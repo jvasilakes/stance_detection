@@ -11,11 +11,11 @@ def parse_args():
 
 
 def main(args):
-    bodies_file = os.path.join(args.datadir, "arc_bodies.csv")
+    bodies_file = os.path.join(args.datadir, "bodies.csv")
     bodies = pd.read_csv(bodies_file)
-    train_stances_file = os.path.join(args.datadir, "arc_stances_train.csv")
+    train_stances_file = os.path.join(args.datadir, "stances_train.csv")
     train_stances = pd.read_csv(train_stances_file)
-    test_stances_file = os.path.join(args.datadir, "arc_stances_test.csv")
+    test_stances_file = os.path.join(args.datadir, "stances_test.csv")
     test_stances = pd.read_csv(test_stances_file)
 
     ntrain = len(train_stances)
