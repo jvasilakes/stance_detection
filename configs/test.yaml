@@ -1,0 +1,24 @@
+Experiment:
+  name:
+  description:
+  logdir:
+  random_seed: 0
+  version: 0
+Data:
+  datadir:
+  num_examples: -1
+  Encoder:
+    encoder_type: default
+    pretrained_model_name_or_path: bert-base-uncased
+    max_seq_length: 256
+Model:
+  model_name: default
+  pretrained_model_name_or_path: bert-base-uncased
+  dropout_prob: 0.0
+Training:
+  epochs: 1
+  batch_size: 32
+  lr: 2e-05
+  weight_decay: 0.0
+  accumulate_grad_batches: 1
+Git: {}
