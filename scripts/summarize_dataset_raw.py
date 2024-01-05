@@ -20,6 +20,9 @@ def main(args):
 
     ntrain = len(train_stances)
     ntest = len(test_stances)
+    print(f"N: {ntrain + ntest}")
+    print(f"Train: {ntrain}")
+    print(f"Test: {ntest}")
 
     train_stance_counts = pd.DataFrame(train_stances.Stance.value_counts())
     train_stance_counts['%'] = train_stance_counts / len(train_stances)

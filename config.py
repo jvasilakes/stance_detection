@@ -44,9 +44,19 @@ def num_examples(val):
     assert val == -1 or val > 0
 
 
-@config.parameter(group="Data.Encoder", default="default", types=str)
+@config.parameter(group="Data", default="all", types=(str, list))
+def tasks_to_load(val):
+    """
+    Can be either "all" or a list of strings specifying the tasks.
+    """
+    if isinstance(val, list):
+        for item in val:
+            assert isinstance(item, str)
+
+
+@config.parameter(group="Data.Encoder", default="default", types=(type(None), str))  # noqa
 def encoder_type(val):
-    assert val in ENCODER_REGISTRY.keys()
+    assert val is None or val in ENCODER_REGISTRY.keys()
 
 
 @config.parameter(group="Data.Encoder", default="bert-base-uncased", types=str)  # noqa
@@ -85,7 +95,7 @@ def batch_size(val):
 
 
 @config.parameter(group="Training", default=2e-5, types=float)
-def lr(val):
+def learn_rate(val):
     assert val > 0.0
 
 

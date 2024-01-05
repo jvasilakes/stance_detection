@@ -1,3 +1,4 @@
+import warnings
 from copy import deepcopy
 from collections import defaultdict
 
@@ -5,6 +6,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pytorch_lightning as pl
+from sklearn.metrics import precision_recall_fscore_support
 from transformers import BertConfig, BertModel
 from transformers import logging as transformers_logging
 from transformers.modeling_outputs import SequenceClassifierOutput
@@ -26,50 +28,75 @@ class StanceModelModule(pl.LightningModule):
             config, label_spec)
 
     def get_model_outputs(self, batch):
-        raise NotImplementedError()
+        try:
+            labels = batch["json"]["labels"]
+        except KeyError:
+            labels = None
+        return self(batch["json"]["encoded"], labels=labels)
 
     def forward(self, inputs, labels=None):
-        raise NotImplementedError()
+        return self.model(inputs, labels=labels)
 
     def training_step(self, batch, batch_idx):
         outputs = self.get_model_outputs(batch)
         total_loss = torch.tensor(0.0).to(self.device)
-        for (task, loss) in outputs.task_losses.items():
-            total_loss += loss
+        for (task, task_out) in outputs.items():
+            loss = task_out.loss
+            total_loss += task_out.loss
             self.log(f"train_loss_{task}", loss.detach().cpu().item())
         self.log("train_loss_total", total_loss.detach().cpu().item())
-        total_loss = outputs.loss
         return {"__key__": batch["__key__"],
                 "loss": total_loss}
 
     def validation_step(self, batch, batch_idx):
         outputs = self.get_model_outputs(batch)
         total_loss = torch.tensor(0.0).to(self.device)
-        for (task, loss) in outputs.task_losses.items():
-            total_loss += loss
+        task_losses = {}
+        task_logits = {}
+        for (task, task_out) in outputs.items():
+            loss = task_out.loss
+            total_loss += task_out.loss
+            task_losses[task] = loss.detach().cpu().item()
+            task_logits[task] = task_out.logits.detach().cpu()
         return {"__key__": batch["__key__"],
                 "loss": total_loss.detach().cpu().item(),
-                "task_losses": outputs.task_losses}
+                "task_losses": task_losses,
+                "task_logits": task_logits,
+                "task_labels": batch["json"]["labels"]}
 
     def validation_epoch_end(self, batch_outputs):
         total_losses = []
         all_task_losses = defaultdict(list)
+        all_preds = defaultdict(list)
+        all_labels = defaultdict(list)
         for batch in batch_outputs:
-            total_losses.append(batch["loss"].detach().cpu().item())
+            total_losses.append(batch["loss"])
             for (task, task_loss) in batch["task_losses"].items():
-                all_task_losses[task].append(task_loss.detach().cpu().item())
+                all_task_losses[task].append(task_loss)
+                logits = batch["task_logits"][task]
+                preds = self.model.predict_from_logits(task, logits)
+                all_preds[task].extend(preds.detach().cpu().numpy())
+                all_labels[task].extend(batch["task_labels"][task].detach().cpu().numpy())  # noqa
         self.log("avg_val_loss_total", np.mean(total_losses))
+
+        all_f1s = []
         for (task, losses) in all_task_losses.items():
             self.log(f"avg_val_loss_{task}", np.mean(losses))
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                _, _, task_f1, _ = precision_recall_fscore_support(
+                    all_labels[task], all_preds[task], average="macro")
+            all_f1s.append(task_f1)
+        self.log("avg_val_f1", np.mean(all_f1s))
 
     def predict_step(self, batch, batch_idx):
         outputs = self.get_model_outputs(batch)
         batch_cp = deepcopy(batch)
-        for (task, logits) in outputs.task_logits.items():
-            if logits.dim() == 1:
-                preds = (torch.sigmoid(logits) >= 0.5).long()
-            else:
-                preds = logits.argmax(1)
+        batch_cp["json"]["predictions"] = {}
+        for (task, task_out) in outputs.items():
+            logits = task_out.logits
+            preds = self.model.predict_from_logits(task, logits)
             batch_cp["json"]["predictions"][task] = preds
         return batch_cp
 
@@ -125,3 +152,12 @@ class BertForMultiTaskSequenceClassification(nn.Module):
                 clf_loss = None
             clf_outputs[task] = SequenceClassifierOutput(
                 loss=clf_loss, logits=logits)
+        return clf_outputs
+
+    def predict_from_logits(self, task, logits):
+        labeldim = self.label_spec[task]
+        if labeldim == 1:
+            preds = (logits.sigmoid() >= 0.5).long()
+        else:
+            preds = logits.argmax(1)
+        return preds
