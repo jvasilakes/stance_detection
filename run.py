@@ -38,7 +38,7 @@ def parse_args():
     predict_parser.add_argument(
         "config_file", type=str, help="Path to yaml config file.")
     predict_parser.add_argument("--split", type=str, default="val",
-                                choices=["train", "val", "test", "gold"])
+                                choices=["train", "val", "test"])
     predict_parser.add_argument("--quiet", action="store_true", default=False)
 
     return parser.parse_args()
@@ -142,7 +142,7 @@ def run_validate(config, datasplit, quiet=False):
         val_dataloader_fn = datamodule.train_dataloader
     elif datasplit == "val":
         val_dataloader_fn = datamodule.val_dataloader
-    elif datasplit in ["test", "gold"]:
+    elif datasplit == "test":
         val_dataloader_fn = datamodule.test_dataloader
     else:
         raise ValueError(f"Unknown data split '{datasplit}'")
@@ -181,7 +181,7 @@ def run_predict(config, datasplit, quiet=False):
         predict_dataloader_fn = datamodule.train_dataloader
     elif datasplit == "val":
         predict_dataloader_fn = datamodule.val_dataloader
-    elif datasplit in ["test", "gold"]:
+    elif datasplit == "test":
         predict_dataloader_fn = datamodule.test_dataloader
     else:
         raise ValueError(f"Unknown data split '{datasplit}'")
