@@ -1,5 +1,8 @@
 # Stance Detection
 
+This project depends upon `experiment_config`: [https://github.com/jvasilakes/experiment-config]
+
+
 ## Data Preparation
 
 First, download the datasets.
