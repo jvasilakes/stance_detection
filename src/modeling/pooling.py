@@ -7,24 +7,25 @@ import torch.nn as nn
 import numpy as np
 import pytorch_lightning as pl
 from sklearn.metrics import precision_recall_fscore_support
-from transformers import AutoConfig, AutoModel
+from transformers import BertConfig, BertModel
 from transformers import logging as transformers_logging
 from transformers.modeling_outputs import SequenceClassifierOutput
 
 from src.modeling.util import register_model
+from src.modeling import TOKEN_POOLER_REGISTRY
 
 
-# Ignore warning that AutoModel is not using some parameters.
+# Ignore warning that BertModel is not using some parameters.
 transformers_logging.set_verbosity_error()
 
 
-@register_model("default")
-class StanceModel(pl.LightningModule):
+@register_model("stance-pooling")
+class StancePoolingModel(pl.LightningModule):
 
     def __init__(self, config, label_spec):
         super().__init__()
         self.config = config
-        self.model = LLMForMultiTaskSequenceClassification.from_config(
+        self.model = BertForMultiTaskSequenceClassificationWithPooling.from_config(  # noqa
             config, label_spec)
 
     def get_model_outputs(self, batch):
@@ -108,27 +109,28 @@ class StanceModel(pl.LightningModule):
         return [opt]
 
 
-class LLMForMultiTaskSequenceClassification(nn.Module):
+class BertForMultiTaskSequenceClassificationWithPooling(nn.Module):
 
     @classmethod
     def from_config(cls, config, label_spec):
         return cls(config.Model.pretrained_model_name_or_path.value,
+                   config.Model.body_pool_fn.value,
                    label_spec,
                    dropout_prob=config.Model.dropout_prob.value,
                    freeze_pretrained=config.Model.freeze_pretrained.value)
 
-    def __init__(self, pretrained_model_name_or_path, label_spec,
-                 dropout_prob=0.0, freeze_pretrained=False):
+    def __init__(self, pretrained_model_name_or_path, body_pool_fn,
+                 label_spec, dropout_prob=0.0, freeze_pretrained=False):
         super().__init__()
         self.pretrained_model_name_or_path = pretrained_model_name_or_path
+        self.body_pool_fn = body_pool_fn
         self.label_spec = label_spec
         self.dropout_prob = dropout_prob
         self.freeze_pretrained = freeze_pretrained
 
-        self.llm_config = AutoConfig.from_pretrained(
+        self.bert_config = BertConfig.from_pretrained(
             self.pretrained_model_name_or_path)
-        # Can override LLM config values here, e.g., dropout.
-        self.llm = AutoModel.from_pretrained(
+        self.bert = BertModel.from_pretrained(
             self.pretrained_model_name_or_path, config=self.bert_config)
 
         if self.freeze_pretrained is True:
@@ -136,15 +138,12 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
                 param.requires_grad = False
 
         self.classifier_heads = nn.ModuleDict()
-        classifier_insize = None
-        for hidden_dim_name in ["hidden_size", "d_model", "n_embd"]:
-            try:
-                classifier_insize = getattr(self.llm_config, hidden_dim_name)
-            except AttributeError:
-                continue
-        if classifier_insize is None:
-            raise AttributeError("Couldn't find model output dimensionality in config")  # noqa
+        self.body_pool_fns = nn.ModuleDict()
+        classifier_insize = self.bert_config.hidden_size
+        body_pool_cls = TOKEN_POOLER_REGISTRY[self.body_pool_fn]
         for (task, labeldim) in self.label_spec.items():
+            self.body_pool_fns[task] = body_pool_cls(
+                classifier_insize, classifier_insize)
             self.classifier_heads[task] = nn.Sequential(
                 nn.Dropout(self.dropout_prob),
                 nn.Linear(classifier_insize, labeldim)
@@ -154,9 +153,16 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
     def forward(self, bert_inputs, labels=None):
         bert_outputs = self.bert(**bert_inputs,
                                  return_dict=True)
-        pooled_output = bert_outputs.pooler_output
+
+        # Mask out everything but the body text
+        token_mask = torch.zeros_like(bert_outputs.last_hidden_state)
+        # TODO: XGLM does not have token_type_ids
+        token_mask[bert_inputs["token_type_ids"] == 1] = 1
+
         clf_outputs = {}
         for (task, clf_head) in self.classifier_heads.items():
+            pooled_output = self.body_pool_fns[task](
+                bert_outputs.last_hidden_state, token_mask)
             logits = clf_head(pooled_output)
             if labels is not None:
                 clf_loss = self.loss_fn(logits.view(-1, self.label_spec[task]),

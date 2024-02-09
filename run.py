@@ -15,6 +15,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 from config import config
 from src.data import StanceDataModule
+from src.data.util import visualize_attention_matrix
 from src.modeling import MODEL_REGISTRY
 
 
@@ -95,7 +96,7 @@ def run_train(config, quiet=False):
 
     filename_fmt = f"{{epoch:02d}}"  # noqa F541 f-string is missing placeholders
     checkpoint_cb = ModelCheckpoint(
-        monitor="avg_val_f1", mode="max", filename=filename_fmt)
+        monitor="avg_val_f1_total", mode="max", filename=filename_fmt)
 
     if torch.cuda.is_available():
         available_gpus = min(1, torch.cuda.device_count())
@@ -294,7 +295,8 @@ def format_results_as_markdown_table(results_dict):
     rows = defaultdict(dict)
     for (k, v) in results_dict.items():
         tmp = k.split('_')
-        task, metric = tmp[0], tmp[-1]
+        _, metric1, metric2, task = tmp
+        metric = '_'.join([metric1, metric2])
         if metric not in columns:
             columns.append(metric)
         rows[task][metric] = v

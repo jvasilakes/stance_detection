@@ -2,7 +2,7 @@ import os
 
 from experiment_config import Config, get_and_run_config_command
 
-from src.modeling.util import MODEL_REGISTRY
+from src.modeling.util import MODEL_REGISTRY, TOKEN_POOLER_REGISTRY
 from src.data.util import ENCODER_REGISTRY
 
 
@@ -74,8 +74,39 @@ def model_name(val):
     assert val in MODEL_REGISTRY.keys()
 
 
-@config.parameter(group="Model", default="bert-base-uncased", types=str)  # noqa
-def pretrained_model_name_or_path(val):
+@config.parameter(group="Model", default="bert-base-uncased", types=str)
+def pretrained_model_name_or_path(val):  # noqa
+    pass
+
+
+@config.parameter(group="Model", default=False, types=bool)
+def freeze_pretrained(val):
+    pass
+
+
+@config.parameter(group="Model", default="max", types=str)
+def target_pool_fn(val):
+    """
+    Not used if model_name != 'stance-pooling-attention'
+    """
+    assert val in TOKEN_POOLER_REGISTRY.keys()
+
+
+@config.parameter(group="Model", default="max", types=str)
+def body_pool_fn(val):
+    """
+    Not used if model_name != 'stance-pooling'
+    """
+    assert val in TOKEN_POOLER_REGISTRY.keys()
+
+
+@config.parameter(group="Model", default={}, types=dict)
+def body_projection_fn_kwargs(val):
+    """
+    Not used if "attention" not in body_pool_fn.
+    Keywords arguments passed to the projection function
+    if using an attention pooling mechanism for body pooling.
+    """
     pass
 
 
@@ -111,7 +142,9 @@ def accumulate_grad_batches(val):
 
 @config.on_load
 def validate_parameters():
-    assert config.Data.Encoder.pretrained_model_name_or_path == config.Model.pretrained_model_name_or_path  # noqa
+    assert config.Data.Encoder.pretrained_model_name_or_path.value == config.Model.pretrained_model_name_or_path.value  # noqa
+    if "attention" in config.Model.model_name.value:
+        assert "attention" in config.Model.body_pool_fn.value
 
 
 if __name__ == "__main__":
