@@ -3,6 +3,7 @@ import json
 import random
 from copy import deepcopy
 from glob import glob
+from collections import defaultdict
 
 import torch
 import numpy as np
@@ -146,24 +147,36 @@ class DanishRumourDataset(object):
     def get_examples(self, thread):
         examples = []
         claim = thread["redditSubmission"]
-        if claim["IsRumour"] is False:
-            return examples
+        #if claim["IsRumour"] is False:
+        #    return examples
         claim_id = claim["submission_id"]
         claim_text = claim["title"]
-        if len(claim["text"]) > 0: 
+        if len(claim["text"]) > 0:
             claim_text = ': '.join([claim_text, claim["text"]])
-        claim_label = claim["TruthStatus"]
+        seen = set()
         for branch in thread["branches"]:
             for reply in branch:
                 reply = reply["comment"]
+                if reply["comment_id"] in seen:
+                    continue
+                seen.add(reply["comment_id"])
+
+                reply_json = {"id": reply["submission_id"],
+                              "text": reply["text"],
+                              "labels": {"Stance": reply["SDQC_Submission"]}  # noqa
+                              }
                 if self.example_format == "stances_only":
-                    example = {"reply": reply["text"],
-                               "label": reply["SDQC_Submission"]}
+                    example = {"reply": reply_json}
                     examples.append(example)
                 elif self.example_format == "pairs":
-                    example = {"claim": claim_text,
-                               "reply": reply["text"],
-                               "label": reply["SDQC_Submission"]}
+                    claim_json = {"id": claim_id,
+                                  "text": claim_text,
+                                  "labels": {"Stance": claim["SourceSDQC"],
+                                             "Rumour": claim["IsRumour"],
+                                             "Veracity": claim["TruthStatus"]}
+                                  }
+                    example = {"claim": claim_json,
+                               "reply": reply_json}
                     examples.append(example)
                 elif self.example_format == "conversation":
                     raise NotImplementedError("example_format = conversation")
@@ -223,3 +236,31 @@ class DanishRumourDataset(object):
             for example in split:
                 sink.write(self.inverse_transform_labels(example))
             sink.close()
+
+    def summarize(self, by_split=True):
+        if by_split is True:
+            # split: task: label: count
+            counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        else:
+            # task: label: count
+            counts = defaultdict(lambda: defaultdict(int))
+        for split in ["train", "val", "test"]:
+            splitdata = getattr(self, split)
+            for ex in splitdata:
+                for (task, lab) in ex["reply"]["labels"].items():
+                    if by_split is True:
+                        counts[split][task][lab] += 1
+                    else:
+                        counts[task][lab] += 1
+
+        for (key1, dict_i) in counts.items():
+            print(key1)
+            for (key2, dict_ii) in dict_i.items():
+                if not isinstance(dict_ii, dict):
+                    lab = key2
+                    count = dict_ii
+                    print(f"    {lab}: {count}")
+                else:
+                    print(" ", task)
+                    for (lab, count) in dict_ii.items():
+                        print(f"    {lab}: {count}")
