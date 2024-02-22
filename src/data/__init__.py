@@ -7,6 +7,7 @@ from .encoders import DefaultEncoder  # noqa
 from .dataset import (ARCStanceDataset,
                       RumourEvalTaskADataset,
                       DanishRumourDataset,
-                      RussianStanceDataset)
+                      RussianStanceDataset,
+                      AraStanceDataset)
 
 from .datamodule import StanceDataModule  # noqa

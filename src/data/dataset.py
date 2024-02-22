@@ -279,9 +279,11 @@ class RumourEvalTaskADataset(AbstractStanceDataset):
                  num_examples=-1,
                  random_seed=0,
                  version=2019,
-                 load_reddit=True,
+                 load_reddit=False,
                  example_format="pairs"):
         assert version in [2017, 2019]
+        if version == 2017:
+            assert load_reddit is False, "2017 has no reddit data."
         self.version = version
         self.load_reddit = load_reddit
         assert example_format in ["stances_only", "pairs", "conversations"]
@@ -290,22 +292,43 @@ class RumourEvalTaskADataset(AbstractStanceDataset):
                          num_examples=num_examples, random_seed=random_seed)
 
     def load_raw(self):
-
         warnings.warn("Data is not encoded! You should save this data split with dm.save(outdir) and then load it again to use it as input to a model.")  # noqa
-        train_dir = os.path.join(self.datadir, "rumoureval-2019-training-data")
-        test_dir = os.path.join(self.datadir, "rumoureval-2019-test-data")
 
-        twitter_train_dir = os.path.join(train_dir, "twitter-english")
-        twitter_test_dir = os.path.join(test_dir, "twitter-en-test-data")
+        if self.version == 2019:
+            train_dir = os.path.join(self.datadir, "rumoureval-2019-training-data")  # noqa
+            test_dir = os.path.join(self.datadir, "rumoureval-2019-test-data")
 
-        train_label_file = open(os.path.join(train_dir, "train-key.json"))
-        val_label_file = open(os.path.join(train_dir, "dev-key.json"))
-        test_label_file = open(os.path.join(
-            self.datadir, "final-eval-key.json"))
+            twitter_train_dir = os.path.join(train_dir, "twitter-english")
+            twitter_test_dir = os.path.join(test_dir, "twitter-en-test-data")
 
-        train_labels = json.load(train_label_file)
-        val_labels = json.load(val_label_file)
-        test_labels = json.load(test_label_file)
+            train_label_file = open(os.path.join(train_dir, "train-key.json"))
+            val_label_file = open(os.path.join(train_dir, "dev-key.json"))
+            test_label_file = open(os.path.join(
+                self.datadir, "final-eval-key.json"))
+            train_labels = json.load(train_label_file)
+            val_labels = json.load(val_label_file)
+            test_labels = json.load(test_label_file)
+
+        elif self.version == 2017:
+            train_dir = os.path.join(self.datadir, "semeval2017-task8-dataset")
+
+            twitter_train_dir = os.path.join(train_dir, "rumoureval-data")
+            twitter_test_dir = os.path.join(
+                    self.datadir, "semeval2017-task8-test-data")
+
+            train_label_file = open(os.path.join(
+                train_dir, "traindev", "rumoureval-subtaskA-train.json"))
+            val_label_file = open(os.path.join(
+                train_dir, "traindev", "rumoureval-subtaskA-dev.json"))
+            test_label_file = open(os.path.join(
+                self.datadir, "test_taska.json"))
+
+            train_labels = json.load(train_label_file)
+            train_labels = {"subtaskaenglish": train_labels}
+            val_labels = json.load(val_label_file)
+            val_labels = {"subtaskaenglish": val_labels}
+            test_labels = json.load(test_label_file)
+            test_labels = {"subtaskaenglish": test_labels}
 
         all_train = self.get_examples_twitter(
             twitter_train_dir, train_labels)
@@ -682,3 +705,48 @@ class RussianStanceDataset(AbstractStanceDataset):
             split_idx = np.random.choice(range(3), p=[0.8, 0.1, 0.1])
             splits[split_idx].append(example)
         return splits
+
+
+@register_dataset("arastance")
+class AraStanceDataset(AbstractStanceDataset):
+
+    LABEL_ENCODINGS = {
+            "Stance": {"Agree": 0,
+                       "Disagree": 1,
+                       "Discuss": 2,
+                       "Unrelated": 3}
+    }
+
+    def load_raw(self):
+        warnings.warn("Data is not encoded! You should save this data split with dm.save(outdir) and then load it again to use it as input to a model.")  # noqa
+        splits = []
+        for split in ["train", "dev", "test"]:
+            splitfile = os.path.join(self.datadir, f"{split}.jsonl")
+            splits.append(self.load_file(splitfile))
+        return splits  # [train, val, test]
+
+    def load_file(self, splitfile):
+        """
+        example = {"__key__": str  # unique ID for this example
+                   "__url__": str  # the source file for this example
+                   "json": {
+                            "target": str  # the target text
+                            "body": str    # the body text of the response
+                            "labels": {task: label}  # for all tasks
+                   }
+                  }
+        """
+        examples = []
+        data = [json.loads(line) for line in open(splitfile)]
+        for datum in data:
+            for (i, article) in enumerate(datum["article"]):
+                example = {"__key__": datum["filename"],
+                           "__url__": datum["claim_url"],
+                           "json": {
+                                    "target": datum["claim"],
+                                    "body": article,
+                                    "labels": {"Stance": datum["stance"][i]}
+                                    }
+                           }
+                examples.append(example)
+        return examples
