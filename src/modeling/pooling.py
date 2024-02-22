@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 import pytorch_lightning as pl
 from sklearn.metrics import precision_recall_fscore_support
-from transformers import BertConfig, BertModel
+from transformers import AutoConfig, AutoModel
 from transformers import logging as transformers_logging
 from transformers.modeling_outputs import SequenceClassifierOutput
 
@@ -15,7 +15,7 @@ from src.modeling.util import register_model
 from src.modeling import TOKEN_POOLER_REGISTRY
 
 
-# Ignore warning that BertModel is not using some parameters.
+# Ignore warning that AutoModel is not using some parameters.
 transformers_logging.set_verbosity_error()
 
 
@@ -25,8 +25,9 @@ class StancePoolingModel(pl.LightningModule):
     def __init__(self, config, label_spec):
         super().__init__()
         self.config = config
-        self.model = BertForMultiTaskSequenceClassificationWithPooling.from_config(  # noqa
+        self.model = LLMForMultiTaskSequenceClassificationWithPooling.from_config(  # noqa
             config, label_spec)
+        self.validation_step_outputs = []
 
     def get_model_outputs(self, batch):
         try:
@@ -59,18 +60,19 @@ class StancePoolingModel(pl.LightningModule):
             total_loss += task_out.loss
             task_losses[task] = loss.detach().cpu().item()
             task_logits[task] = task_out.logits.detach().cpu()
-        return {"__key__": batch["__key__"],
-                "loss": total_loss.detach().cpu().item(),
-                "task_losses": task_losses,
-                "task_logits": task_logits,
-                "task_labels": batch["json"]["labels"]}
+        output = {"__key__": batch["__key__"],
+                  "loss": total_loss.detach().cpu().item(),
+                  "task_losses": task_losses,
+                  "task_logits": task_logits,
+                  "task_labels": batch["json"]["labels"]}
+        self.validation_step_outputs.append(output)
 
-    def validation_epoch_end(self, batch_outputs):
+    def on_validation_epoch_end(self):
         total_losses = []
         all_task_losses = defaultdict(list)
         all_preds = defaultdict(list)
         all_labels = defaultdict(list)
-        for batch in batch_outputs:
+        for batch in self.validation_step_outputs:
             total_losses.append(batch["loss"])
             for (task, task_loss) in batch["task_losses"].items():
                 all_task_losses[task].append(task_loss)
@@ -89,7 +91,8 @@ class StancePoolingModel(pl.LightningModule):
                 _, _, task_f1, _ = precision_recall_fscore_support(
                     all_labels[task], all_preds[task], average="macro")
             all_f1s.append(task_f1)
-        self.log("avg_val_f1", np.mean(all_f1s))
+        self.log("avg_val_f1_total", np.mean(all_f1s))
+        self.validation_step_outputs.clear()
 
     def predict_step(self, batch, batch_idx):
         outputs = self.get_model_outputs(batch)
@@ -109,7 +112,7 @@ class StancePoolingModel(pl.LightningModule):
         return [opt]
 
 
-class BertForMultiTaskSequenceClassificationWithPooling(nn.Module):
+class LLMForMultiTaskSequenceClassificationWithPooling(nn.Module):
 
     @classmethod
     def from_config(cls, config, label_spec):
@@ -128,18 +131,18 @@ class BertForMultiTaskSequenceClassificationWithPooling(nn.Module):
         self.dropout_prob = dropout_prob
         self.freeze_pretrained = freeze_pretrained
 
-        self.bert_config = BertConfig.from_pretrained(
+        self.llm_config = AutoConfig.from_pretrained(
             self.pretrained_model_name_or_path)
-        self.bert = BertModel.from_pretrained(
-            self.pretrained_model_name_or_path, config=self.bert_config)
+        self.llm = AutoModel.from_pretrained(
+            self.pretrained_model_name_or_path, config=self.llm_config)
 
         if self.freeze_pretrained is True:
-            for param in self.bert.parameters():
+            for param in self.llm.parameters():
                 param.requires_grad = False
 
         self.classifier_heads = nn.ModuleDict()
         self.body_pool_fns = nn.ModuleDict()
-        classifier_insize = self.bert_config.hidden_size
+        classifier_insize = self.llm_config.hidden_size
         body_pool_cls = TOKEN_POOLER_REGISTRY[self.body_pool_fn]
         for (task, labeldim) in self.label_spec.items():
             self.body_pool_fns[task] = body_pool_cls(
@@ -150,19 +153,19 @@ class BertForMultiTaskSequenceClassificationWithPooling(nn.Module):
             )
         self.loss_fn = nn.CrossEntropyLoss()
 
-    def forward(self, bert_inputs, labels=None):
-        bert_outputs = self.bert(**bert_inputs,
-                                 return_dict=True)
+    def forward(self, llm_inputs, labels=None):
+        llm_outputs = self.llm(**llm_inputs,
+                               return_dict=True)
 
         # Mask out everything but the body text
-        token_mask = torch.zeros_like(bert_outputs.last_hidden_state)
+        token_mask = torch.zeros_like(llm_outputs.last_hidden_state)
         # TODO: XGLM does not have token_type_ids
-        token_mask[bert_inputs["token_type_ids"] == 1] = 1
+        token_mask[llm_inputs["token_type_ids"] == 1] = 1
 
         clf_outputs = {}
         for (task, clf_head) in self.classifier_heads.items():
             pooled_output = self.body_pool_fns[task](
-                bert_outputs.last_hidden_state, token_mask)
+                llm_outputs.last_hidden_state, token_mask)
             logits = clf_head(pooled_output)
             if labels is not None:
                 clf_loss = self.loss_fn(logits.view(-1, self.label_spec[task]),

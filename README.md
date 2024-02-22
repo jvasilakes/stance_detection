@@ -1,6 +1,11 @@
 # Stance Detection
 
-This project depends upon `experiment_config`: [https://github.com/jvasilakes/experiment-config]
+
+## Dependencies
+
+`experiment_config`: [https://github.com/jvasilakes/experiment-config]
+`sparse-structured-attention`: Original is [https://github.com/vene/sparse-structured-attention/tree/master]. We've included an updated version refactored for modern Pytorch versions. Install with `python setup.py develop`.
+`tabulate`
 
 
 ## Data Preparation
@@ -11,7 +16,7 @@ First, download the datasets.
 bash download.sh
 ```
 
-This will create `data/{ARC,FNC}/raw`.
+This will create `data/{ARC,FNC}/raw` and `data/RumourEval/`.
 
 
 Next, preprocess the data, removing duplicate entries and creating the validation splits.
@@ -20,6 +25,7 @@ This will also print out a markdown formatted table of summary statistics.
 ```
 python preprocess.py data/ARC/raw data/ARC/preprocessed/
 python preprocess.py data/FNC/raw data/FNC/preprocessed/
+python preprocess.py data/RumourEval/traindev/ data/RumourEval/preprocessed/
 ```
 
 ## Model Training 
@@ -31,8 +37,9 @@ mkdir configs/
 python config.py new configs/myconfig.yaml
 ```
 
-Edit the config file as you desire. The `datadir` should be one of the `data/{ARC,FNC}/preprocessed`
-directories you created above. Once you've created it, you can validate it with the following command.
+Edit the config file as you desire. The `datadir` should be one of the `data/{ARC,FNC,RumourEval}/preprocessed`
+directories you created above. The `dataset_name` should be `{arc,rumoureval}`.
+Once you've created it, you can validate it with the following command.
 
 ```
 python config.py print configs/myconfig.yaml

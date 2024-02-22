@@ -72,6 +72,13 @@ class FirstEntityPooler(BaseEntityPooler):
         return pooled
 
 
+@register_token_pooler("last")
+class LastEntityPooler(BaseEntityPooler):
+
+    def pool_fn(self, masked_hidden, token_mask):
+        pass
+
+
 class BaseAttentionEntityPooler(BaseEntityPooler):
 
     def __init__(self, insize, outsize, **projection_fn_kwargs):

@@ -26,6 +26,7 @@ class StanceModel(pl.LightningModule):
         self.config = config
         self.model = LLMForMultiTaskSequenceClassification.from_config(
             config, label_spec)
+        self.validation_step_outputs = []
 
     def get_model_outputs(self, batch):
         try:
@@ -58,18 +59,19 @@ class StanceModel(pl.LightningModule):
             total_loss += task_out.loss
             task_losses[task] = loss.detach().cpu().item()
             task_logits[task] = task_out.logits.detach().cpu()
-        return {"__key__": batch["__key__"],
-                "loss": total_loss.detach().cpu().item(),
-                "task_losses": task_losses,
-                "task_logits": task_logits,
-                "task_labels": batch["json"]["labels"]}
+        output = {"__key__": batch["__key__"],
+                  "loss": total_loss.detach().cpu().item(),
+                  "task_losses": task_losses,
+                  "task_logits": task_logits,
+                  "task_labels": batch["json"]["labels"]}
+        self.validation_step_outputs.append(output)
 
-    def validation_epoch_end(self, batch_outputs):
+    def on_validation_epoch_end(self):
         total_losses = []
         all_task_losses = defaultdict(list)
         all_preds = defaultdict(list)
         all_labels = defaultdict(list)
-        for batch in batch_outputs:
+        for batch in self.validation_step_outputs:
             total_losses.append(batch["loss"])
             for (task, task_loss) in batch["task_losses"].items():
                 all_task_losses[task].append(task_loss)
@@ -88,7 +90,8 @@ class StanceModel(pl.LightningModule):
                 _, _, task_f1, _ = precision_recall_fscore_support(
                     all_labels[task], all_preds[task], average="macro")
             all_f1s.append(task_f1)
-        self.log("avg_val_f1", np.mean(all_f1s))
+        self.log("avg_val_f1_total", np.mean(all_f1s))
+        self.validation_step_outputs.clear()
 
     def predict_step(self, batch, batch_idx):
         outputs = self.get_model_outputs(batch)
@@ -129,10 +132,10 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
             self.pretrained_model_name_or_path)
         # Can override LLM config values here, e.g., dropout.
         self.llm = AutoModel.from_pretrained(
-            self.pretrained_model_name_or_path, config=self.bert_config)
+            self.pretrained_model_name_or_path, config=self.llm_config)
 
         if self.freeze_pretrained is True:
-            for param in self.bert.parameters():
+            for param in self.llm.parameters():
                 param.requires_grad = False
 
         self.classifier_heads = nn.ModuleDict()
@@ -151,10 +154,11 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
             )
         self.loss_fn = nn.CrossEntropyLoss()
 
-    def forward(self, bert_inputs, labels=None):
-        bert_outputs = self.bert(**bert_inputs,
-                                 return_dict=True)
-        pooled_output = bert_outputs.pooler_output
+    def forward(self, llm_inputs, labels=None):
+        llm_outputs = self.llm(**llm_inputs,
+                               return_dict=True)
+        # TODO: X{G}LM has no pooler_output
+        pooled_output = llm_outputs.pooler_output
         clf_outputs = {}
         for (task, clf_head) in self.classifier_heads.items():
             logits = clf_head(pooled_output)

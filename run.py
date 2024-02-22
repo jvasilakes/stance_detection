@@ -99,15 +99,14 @@ def run_train(config, quiet=False):
         monitor="avg_val_f1_total", mode="max", filename=filename_fmt)
 
     if torch.cuda.is_available():
-        available_gpus = min(1, torch.cuda.device_count())
+        accelerator = "gpu"
     else:
-        available_gpus = 0
+        accelerator = "cpu"
         warnings.warn("No CUDA devices found. Using CPU.")
-    print(f"GPUs: {available_gpus}")
     trainer = pl.Trainer(
+        accelerator=accelerator,
         max_epochs=config.Training.epochs.value,
         accumulate_grad_batches=config.Training.accumulate_grad_batches.value,
-        gpus=available_gpus,
         logger=logger,
         callbacks=[checkpoint_cb],
         log_every_n_steps=1,
@@ -128,15 +127,13 @@ def run_validate(config, datasplit, quiet=False):
     model.eval()
 
     if torch.cuda.is_available():
-        available_gpus = min(1, torch.cuda.device_count())
+        accelerator = "gpu"
     else:
-        available_gpus = 0
+        accelerator = "cpu"
         warnings.warn("No CUDA devices found. Using CPU.")
-    print(f"GPUs: {available_gpus}")
-
     trainer = pl.Trainer(
         logger=False,
-        gpus=available_gpus,
+        accelerator=accelerator,
         enable_progress_bar=not quiet)
 
     if datasplit == "train":
@@ -167,15 +164,13 @@ def run_predict(config, datasplit, quiet=False):
     model.eval()
 
     if torch.cuda.is_available():
-        available_gpus = min(1, torch.cuda.device_count())
+        accelerator = "gpu"
     else:
-        available_gpus = 0
+        accelerator = "cpu"
         warnings.warn("No CUDA devices found. Using CPU.")
-    print(f"GPUs: {available_gpus}")
-
     trainer = pl.Trainer(
         logger=False,
-        gpus=available_gpus,
+        accelerator=accelerator,
         enable_progress_bar=not quiet)
 
     if datasplit == "train":

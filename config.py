@@ -2,8 +2,8 @@ import os
 
 from experiment_config import Config, get_and_run_config_command
 
-from src.modeling.util import MODEL_REGISTRY, TOKEN_POOLER_REGISTRY
-from src.data.util import ENCODER_REGISTRY
+from src.modeling import MODEL_REGISTRY, TOKEN_POOLER_REGISTRY
+from src.data import ENCODER_REGISTRY, DATASET_REGISTRY
 
 
 config = Config("StanceDetectionConfig")
@@ -35,6 +35,11 @@ def version(val):
 
 
 @config.parameter(group="Data", types=str)
+def dataset_name(val):
+    assert val in DATASET_REGISTRY
+
+
+@config.parameter(group="Data", types=str)
 def datadir(val):
     assert os.path.isdir(val)
 
@@ -52,6 +57,14 @@ def tasks_to_load(val):
     if isinstance(val, list):
         for item in val:
             assert isinstance(item, str)
+
+
+@config.parameter(group="Data", default={}, types=dict)
+def dataset_kwargs(val):
+    """
+    Dataset-specific keyword arguments to pass to the dataset __init__ method.
+    """
+    pass
 
 
 @config.parameter(group="Data.Encoder", default="default", types=(type(None), str))  # noqa
@@ -74,8 +87,8 @@ def model_name(val):
     assert val in MODEL_REGISTRY.keys()
 
 
-@config.parameter(group="Model", default="bert-base-uncased", types=str)
-def pretrained_model_name_or_path(val):  # noqa
+@config.parameter(group="Model", default="bert-base-uncased", types=str)  # noqa
+def pretrained_model_name_or_path(val):
     pass
 
 

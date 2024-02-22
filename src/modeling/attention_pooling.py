@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 import pytorch_lightning as pl
 from sklearn.metrics import precision_recall_fscore_support
-from transformers import BertConfig, BertModel
+from transformers import AutoConfig, AutoModel
 from transformers import logging as transformers_logging
 
 from src.modeling import TOKEN_POOLER_REGISTRY
@@ -15,7 +15,7 @@ from src.modeling.util import register_model
 from src.modeling.modeling_outputs import SequenceClassifierOutputWithTokenMask
 
 
-# Ignore warning that BertModel is not using some parameters.
+# Ignore warning that AutoModel is not using some parameters.
 transformers_logging.set_verbosity_error()
 
 
@@ -25,8 +25,9 @@ class StancePoolingModelWithAttention(pl.LightningModule):
     def __init__(self, config, label_spec):
         super().__init__()
         self.config = config
-        self.model = BertForMultiTaskSequenceClassificationWithAttentionPooling.from_config(  # noqa
+        self.model = LLMForMultiTaskSequenceClassificationWithAttentionPooling.from_config(  # noqa
             config, label_spec)
+        self.validation_step_outputs = []
 
     def get_model_outputs(self, batch):
         try:
@@ -71,22 +72,23 @@ class StancePoolingModelWithAttention(pl.LightningModule):
             mask_coverage = (task_out.mask > 0).sum(1) / seq_lengths
             mask_coverages[task] = mask_coverage.detach().cpu().numpy()
             mask_vals[task] = task_out.mask[task_out.mask > 0].detach().cpu().numpy()  # noqa
-        return {"__key__": batch["__key__"],
-                "loss": total_loss.detach().cpu().item(),
-                "task_losses": task_losses,
-                "task_logits": task_logits,
-                "task_labels": batch["json"]["labels"],
-                "mask_coverage": mask_coverages,
-                "mask_vals": mask_vals}
+        output = {"__key__": batch["__key__"],
+                  "loss": total_loss.detach().cpu().item(),
+                  "task_losses": task_losses,
+                  "task_logits": task_logits,
+                  "task_labels": batch["json"]["labels"],
+                  "mask_coverage": mask_coverages,
+                  "mask_vals": mask_vals}
+        self.validation_step_outputs.append(output)
 
-    def validation_epoch_end(self, batch_outputs):
+    def on_validation_epoch_end(self):
         total_losses = []
         all_task_losses = defaultdict(list)
         all_preds = defaultdict(list)
         all_labels = defaultdict(list)
         all_mask_coverages = defaultdict(list)
         all_mask_vals = defaultdict(list)
-        for batch in batch_outputs:
+        for batch in self.validation_step_outputs:
             total_losses.append(batch["loss"])
             for (task, task_loss) in batch["task_losses"].items():
                 all_task_losses[task].append(task_loss)
@@ -112,6 +114,7 @@ class StancePoolingModelWithAttention(pl.LightningModule):
                     all_labels[task], all_preds[task], average="macro")
             all_f1s.append(task_f1)
         self.log("avg_val_f1_total", np.mean(all_f1s))
+        self.validation_step_outputs.clear()
 
     def predict_step(self, batch, batch_idx):
         outputs = self.get_model_outputs(batch)
@@ -133,7 +136,7 @@ class StancePoolingModelWithAttention(pl.LightningModule):
         return [opt]
 
 
-class BertForMultiTaskSequenceClassificationWithAttentionPooling(nn.Module):
+class LLMForMultiTaskSequenceClassificationWithAttentionPooling(nn.Module):
 
     @classmethod
     def from_config(cls, config, label_spec):
@@ -158,22 +161,22 @@ class BertForMultiTaskSequenceClassificationWithAttentionPooling(nn.Module):
         self.dropout_prob = dropout_prob
         self.freeze_pretrained = freeze_pretrained
 
-        self.bert_config = BertConfig.from_pretrained(
+        self.llm_config = AutoConfig.from_pretrained(
             self.pretrained_model_name_or_path)
-        self.bert = BertModel.from_pretrained(
-            self.pretrained_model_name_or_path, config=self.bert_config)
+        self.llm = AutoModel.from_pretrained(
+            self.pretrained_model_name_or_path, config=self.llm_config)
 
         if self.freeze_pretrained is True:
-            for param in self.bert.parameters():
+            for param in self.llm.parameters():
                 param.requires_grad = False
 
         target_pool_cls = TOKEN_POOLER_REGISTRY[self.target_pool_fn]
         self.target_pooler = target_pool_cls(
-            self.bert_config.hidden_size, self.bert_config.hidden_size)
+            self.llm_config.hidden_size, self.llm_config.hidden_size)
 
         self.classifier_heads = nn.ModuleDict()
         self.body_poolers = nn.ModuleDict()
-        classifier_insize = self.bert_config.hidden_size
+        classifier_insize = self.llm_config.hidden_size
         body_pool_cls = TOKEN_POOLER_REGISTRY[self.body_pool_fn]
         for (task, labeldim) in self.label_spec.items():
             self.body_poolers[task] = body_pool_cls(
@@ -185,35 +188,35 @@ class BertForMultiTaskSequenceClassificationWithAttentionPooling(nn.Module):
             )
         self.loss_fn = nn.CrossEntropyLoss()
 
-    def forward(self, bert_inputs, labels=None):
-        bert_outputs = self.bert(**bert_inputs,
-                                 return_dict=True)
+    def forward(self, llm_inputs, labels=None):
+        llm_outputs = self.llm(**llm_inputs,
+                               return_dict=True)
 
-        if bert_inputs["attention_mask"].dim() == 2:
+        if llm_inputs["attention_mask"].dim() == 2:
             # Attention vector. The target mask is thus where the
             # token_type_ids are 0 and the attention_mask is 1.
-            target_mask = torch.logical_xor(bert_inputs["token_type_ids"],
-                                            bert_inputs["attention_mask"]).int()  # noqa
+            target_mask = torch.logical_xor(llm_inputs["token_type_ids"],
+                                            llm_inputs["attention_mask"]).int()  # noqa
         else:
             # Attention matrix. Because the target only attends to itself
             # the target mask is simply the first row of the attention_mask.
-            target_mask = bert_inputs["attention_mask"][:, 0]
+            target_mask = llm_inputs["attention_mask"][:, 0]
 
         # TODO: XGLM has no pooler_output
-        bert_hidden_dim = bert_outputs.pooler_output.size(-1)
-        target_mask = target_mask.unsqueeze(-1).repeat(1, 1, bert_hidden_dim)
+        llm_hidden_dim = llm_outputs.pooler_output.size(-1)
+        target_mask = target_mask.unsqueeze(-1).repeat(1, 1, llm_hidden_dim)
 
-        body_mask = torch.zeros_like(bert_outputs.last_hidden_state)
+        body_mask = torch.zeros_like(llm_outputs.last_hidden_state)
         # TODO: XGLM has no token_type_ids
-        body_mask[bert_inputs["token_type_ids"] == 1] = 1
+        body_mask[llm_inputs["token_type_ids"] == 1] = 1
 
-        target_pooled = self.target_pooler(bert_outputs.last_hidden_state,
+        target_pooled = self.target_pooler(llm_outputs.last_hidden_state,
                                            target_mask)
 
         clf_outputs = {}
         for (task, clf_head) in self.classifier_heads.items():
             pooled_output, attentions = self.body_poolers[task](
-                bert_outputs.last_hidden_state, body_mask, target_pooled)
+                llm_outputs.last_hidden_state, body_mask, target_pooled)
             logits = clf_head(pooled_output)
             if labels is not None:
                 clf_loss = self.loss_fn(logits.view(-1, self.label_spec[task]),
