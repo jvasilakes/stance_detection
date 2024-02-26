@@ -208,7 +208,7 @@ class ARCStanceDataset(AbstractStanceDataset):
         # Remove from train the examples that are in both
         merged = pd.merge(train_stances, test_stances,
                           on=["Headline", "Body ID"], how="inner")
-        train_ = train_stances.append(merged)
+        train_ = train_stances._append(merged)
         train_["duplicated"] = train_.duplicated(["Headline", "Body ID"], keep=False)  # noqa
         train_stances = train_[~train_["duplicated"]][["Headline", "Body ID", "Stance"]]  # noqa
 

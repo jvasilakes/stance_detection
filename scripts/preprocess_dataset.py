@@ -15,12 +15,35 @@ def parse_args():
                                 dataset to preprocess.""")
     parser.add_argument("outdir", type=str,
                         help="Where to save the processed dataset.")
+    parser.add_argument(
+        "-k", "--kwargs", nargs=2, metavar=("GROUP.PARAM", "VALUE"),
+        action="append", default=[],
+        help="""Keyword argument to pass to the dataset __init__
+        E.g., -k year 2017 -k load_reddit True""")
     return parser.parse_args()
 
 
+def maybe_cast(val):
+    """
+    Command line keyword arguments are always str.
+    Try to cast them to the relevant type.
+    """
+    if val.lower() == "true":
+        return True
+    elif val.lower() == "false":
+        return False
+    else:
+        try:
+            return int(val)
+            return float(val)
+        except ValueError:
+            return val
+
+
 def main(args):
+    dataset_kwargs = {k: maybe_cast(v) for (k, v) in args.kwargs}
     dataset_cls = DATASET_REGISTRY[args.dataset_name]
-    ds = dataset_cls(args.datadir)
+    ds = dataset_cls(args.datadir, **dataset_kwargs)
     ds.save(args.outdir)
     ds.summarize()
 
