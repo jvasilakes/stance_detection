@@ -4,7 +4,7 @@
 ## Dependencies
 
 `experiment_config`: [https://github.com/jvasilakes/experiment-config]
-`sparse-structured-attention`: Original is [https://github.com/vene/sparse-structured-attention/tree/master]. We've included an updated version refactored for modern Pytorch versions. Install with `python setup.py develop`.
+`sparse-structured-attention`: [https://github.com/mtreviso/sparse-structured-attention]
 `tabulate`
 
 
