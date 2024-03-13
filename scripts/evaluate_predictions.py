@@ -35,11 +35,11 @@ def main(args):
         attn_min = all_attention_vals_nonzero.min()
         attn_max = all_attention_vals_nonzero.max()
         attn_chunks = compute_chunks(attention_vals)
-        print(f"Attention Weights")
+        print("Attention Weights")
         print(f"  Coverage: {coverage*100:.3f}%")
         print(f"  Distribution (mean, sd): {attn_mean:.3f} +/- {attn_sd:.3f}")
         print(f"  Distribution (min, max): {attn_min:.8f} - {attn_max:.3f}")
-        print(f"  Contiguity (num, len): {attn_chunks[:,0].mean():.3f}, {attn_chunks[:, 1].mean():.3f}")
+        print(f"  Contiguity (num, len): {attn_chunks[:,0].mean():.3f}, {attn_chunks[:, 1].mean():.3f}")  # noqa
         print()
 
     sorted_labels = sorted(set(labels))
@@ -47,12 +47,15 @@ def main(args):
     print_confusion_matrix(cm)
     p, r, f, _ = precision_recall_fscore_support(labels, preds, average=None,
                                                  labels=sorted_labels)
-    p = np.concatenate([p, [p.mean()]])
-    r = np.concatenate([r, [r.mean()]])
-    f = np.concatenate([f, [f.mean()]])
+    pm, rm, fm, _ = precision_recall_fscore_support(
+            labels, preds, average="micro", labels=sorted_labels)
+
+    p = np.concatenate([p, [p.mean(), pm]])
+    r = np.concatenate([r, [r.mean(), rm]])
+    f = np.concatenate([f, [f.mean(), fm]])
 
     print()
-    print(sorted_labels + ["Macro"])
+    print(sorted_labels + ["Macro", "Micro"])
     for (metric_name, vals) in zip(["P", "R", "F"], [p, r, f]):
         val_str = ' '.join(f"{val:.4f}" for val in vals)
         print(f"{metric_name}: {val_str}")
