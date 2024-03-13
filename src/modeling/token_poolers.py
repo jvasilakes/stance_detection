@@ -112,6 +112,8 @@ class BaseAttentionEntityPooler(BaseEntityPooler):
         projection_fn = some.projection_fn
         return self.generic_attention_pooler(
             masked_hidden, token_mask, pooled_tokens, projection_fn)
+        OR
+        return self.generic_cross_attention_pooler()
         """
         raise NotImplementedError()
 
@@ -149,6 +151,13 @@ class BaseAttentionEntityPooler(BaseEntityPooler):
         # and sum over the token dimension to obtain the weighted average.
         pooled = (masked_hidden * attention_probs).sum(1)
         return pooled, attention_probs
+                                        
+
+    def generic_cross_attention_pooler(self, masked_hidden, token_mask,
+                                       pooled_tokens, projection_fn):
+        # Implement CrossAttention class here.
+        # return skip_connection_outputs, attention_weights
+        pass
 
 
 @register_token_pooler("attention-softmax")
