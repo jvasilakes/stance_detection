@@ -4,7 +4,9 @@ import argparse
 from glob import glob
 from tqdm import tqdm
 from copy import deepcopy
+from itertools import zip_longest
 
+import torch
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 
 
@@ -14,10 +16,14 @@ def parse_args():
     parser.add_argument("datadir", type=str,
                         help="Directory containing {train,val,test}.jsonl")
     parser.add_argument("outdir", type=str)
+    parser.add_argument("--device-num", "-D", type=int, default=0,
+                        help="Device to use")
+    parser.add_argument("--batch-size", "-B", type=int, default=128)
     return parser.parse_args()
 
 
 def main(args):
+    device = f"cuda:{args.device_num}"
     if args.language == "de":
         model_name = "aszfcxcgszdx/t5-large-en-de"
     elif args.language in ["zh", "ru"]:
@@ -25,6 +31,7 @@ def main(args):
     elif args.language == "pt":
         model_name = "unicamp-dl/translation-en-pt-t5"
     model = T5ForConditionalGeneration.from_pretrained(model_name)
+    model = model.to(device)
     tokenizer = T5Tokenizer.from_pretrained(model_name)
 
     os.makedirs(args.outdir, exist_ok=False)
@@ -35,13 +42,10 @@ def main(args):
         examples = [json.loads(line) for line in open(filepath)]
 
         translated = []
-        i = 0
-        for example in tqdm(examples, desc=fname):
-            if i >= 3:
-                break
-            i += 1
-            trans_example = translate(example, tokenizer, model)
-            translated.append(trans_example)
+        n_batches = len(examples) // args.batch_size
+        for examples in tqdm(batch(examples, args.batch_size), desc=fname, total=n_batches):
+            trans_examples = translate(examples, tokenizer, model, args.language, device=device)
+            translated.extend(trans_examples)
         outpath = os.path.join(args.outdir, fname)
         with open(outpath, 'w') as outF:
             for ex in translated:
@@ -49,20 +53,27 @@ def main(args):
                 outF.write('\n')
 
 
-def translate(example, tokenizer, model):
-    prefix = 'translate to ru: '
-    trans_example = deepcopy(example)
+def translate(examples, tokenizer, model, language, device="cpu"):
+    prefix = f"translate to {language}: "
+    trans_examples = deepcopy(examples)
 
     for text_type in ["target", "body"]:
-        text = example["json"][text_type]
-        src_text = prefix + text
-        # translate English to Russian
-        input_ids = tokenizer(src_text, return_tensors="pt")
-        generated_tokens = model.generate(**input_ids)
-        result = tokenizer.batch_decode(
+        text_batch = [prefix + ex["json"][text_type] for ex in examples]
+        inputs = tokenizer(text_batch, return_tensors="pt",
+                           padding=True).to(device)
+        generated_tokens = model.generate(**inputs)
+        results = tokenizer.batch_decode(
                 generated_tokens, skip_special_tokens=True)
-        trans_example["json"][text_type] = result[0]
-    return trans_example
+        for (i, tex) in enumerate(trans_examples):
+            tex["json"][text_type] = results[i]
+        del inputs
+    return trans_examples
+
+
+def batch(iterable, batch_size=64):
+    args = [iter(iterable)] * batch_size
+    for batch in  zip_longest(*args, fillvalue=None):
+        yield [ex for ex in batch if ex is not None]
 
 
 if __name__ == "__main__":
