@@ -21,6 +21,8 @@ from src.modeling import MODEL_REGISTRY
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--cuda-device", "-D", type=int, default="auto",
+                        help="Which GPU to run on, if more than one is available")
 
     subparsers = parser.add_subparsers(dest="command")
     train_parser = subparsers.add_parser("train", help="Run model training")
@@ -55,7 +57,7 @@ def main(args):
 
     pl.seed_everything(config.Experiment.random_seed.value, workers=True)
 
-    run_kwargs = {"quiet": args.quiet}
+    run_kwargs = {"quiet": args.quiet, "cuda_device": args.cuda_device}
     if args.command == "train":
         run_fn = run_train
     elif args.command == "validate":
@@ -74,7 +76,7 @@ def main(args):
     print(f"  Time elapsed: {end_time - start_time}")
 
 
-def run_train(config, quiet=False):
+def run_train(config, quiet=False, cuda_device="auto"):
     logdir = config.Experiment.logdir.value
     version = config.Experiment.version.value
     exp_name = config.Experiment.name.value
@@ -100,11 +102,14 @@ def run_train(config, quiet=False):
 
     if torch.cuda.is_available():
         accelerator = "gpu"
+        if cuda_device != "auto":
+            cuda_device = [cuda_device]
     else:
         accelerator = "cpu"
         warnings.warn("No CUDA devices found. Using CPU.")
     trainer = pl.Trainer(
         accelerator=accelerator,
+        devices=cuda_device,
         max_epochs=config.Training.epochs.value,
         accumulate_grad_batches=config.Training.accumulate_grad_batches.value,
         logger=logger,
@@ -115,7 +120,7 @@ def run_train(config, quiet=False):
     trainer.fit(model, datamodule=datamodule)
 
 
-def run_validate(config, datasplit, quiet=False):
+def run_validate(config, datasplit, quiet=False, cuda_device="auto"):
     datamodule = StanceDataModule(config)
     datamodule.setup()
 
@@ -128,12 +133,15 @@ def run_validate(config, datasplit, quiet=False):
 
     if torch.cuda.is_available():
         accelerator = "gpu"
+        if cuda_device != "auto":
+            cuda_device = [cuda_device]
     else:
         accelerator = "cpu"
         warnings.warn("No CUDA devices found. Using CPU.")
     trainer = pl.Trainer(
         logger=False,
         accelerator=accelerator,
+        devices=cuda_device,
         enable_progress_bar=not quiet)
 
     if datasplit == "train":
@@ -152,7 +160,7 @@ def run_validate(config, datasplit, quiet=False):
     print(table)
 
 
-def run_predict(config, datasplit, quiet=False):
+def run_predict(config, datasplit, quiet=False, cuda_device="auto"):
     datamodule = StanceDataModule(config)
     datamodule.setup()
 
@@ -165,12 +173,15 @@ def run_predict(config, datasplit, quiet=False):
 
     if torch.cuda.is_available():
         accelerator = "gpu"
+        if cuda_device != "auto":
+            cuda_device = [cuda_device]
     else:
         accelerator = "cpu"
         warnings.warn("No CUDA devices found. Using CPU.")
     trainer = pl.Trainer(
         logger=False,
         accelerator=accelerator,
+        devices=cuda_device,
         enable_progress_bar=not quiet)
 
     if datasplit == "train":
