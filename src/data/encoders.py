@@ -51,32 +51,61 @@ class Encoder(object):
 @register_encoder("default")
 class DefaultEncoder(Encoder):
 
-    def encode_single_example(self, example):
+    def run_tokenize(self, example):
         data = example["json"]
         text_pair = [data["target"], data["body"]]
         encoded = self.tokenizer([text_pair], max_length=self.max_seq_length,
                                  padding="max_length", truncation=True,
                                  return_tensors="pt")
+        return encoded
 
+    def encode_single_example(self, example):
+        encoded = self.run_tokenize(example)
         # squeeze because the tokenizer always includes a batch dimension,
         # which we don't want quite yet.
-        data["encoded"] = {k: v.squeeze() for (k, v) in encoded.items()}
+        example["json"]["encoded"] = {k: v.squeeze() for (k, v) in encoded.items()}  # noqa
         return example
+
+
+@register_encoder("default-t5")
+class DefaultEncoderT5(DefaultEncoder):
+
+    def run_tokenize(self, example):
+        data = example["json"]
+        inputs1_encoded = self.tokenizer(
+            data["target"], max_length=self.max_seq_length // 2,
+            padding="max_length", truncation=True, return_tensors="pt")
+        inputs2_encoded = self.tokenizer(
+            data["body"], max_length=self.max_seq_length // 2,
+            padding="max_length", truncation=True, return_tensors="pt")
+        encoded = {"input_ids": inputs1_encoded["input_ids"],
+                   "attention_mask": inputs1_encoded["attention_mask"],
+                   "decoder_input_ids": inputs2_encoded["input_ids"],
+                   "decoder_attention_mask": inputs2_encoded["attention_mask"]}
+        return encoded
 
 
 @register_encoder("directional-attention")
 class DirectionalAttentionEncoder(Encoder):
 
-    def encode_single_example(self, example):
+    def run_tokenize(self, example):
         data = example["json"]
         text_pair = [data["target"], data["body"]]
         encoded = self.tokenizer([text_pair], max_length=self.max_seq_length,
                                  padding="max_length", truncation=True,
                                  return_tensors="pt")
+        return encoded
+
+    def encode_single_example(self, example):
+        encoded = self.run_tokenize(example)
+        if self.tokenizer.sep_token_id is None:
+            raise AttributeError("DirectionalAttentionEncoder assumes target and body are concatenated, which does not seem to be the case.")  # noqa
+        # BERT
         # Get index of first occurrence of [SEP] token
         # Add 1 because we want to include the [SEP] token
         target_seq_length = 1 + (encoded["input_ids"][0] == self.tokenizer.sep_token_id).nonzero()[0].item()  # noqa
         unpadded_seq_length = encoded["attention_mask"].sum()
+
         attn_matrix = torch.zeros((self.max_seq_length, self.max_seq_length),
                                   dtype=torch.long)
 
@@ -91,5 +120,5 @@ class DirectionalAttentionEncoder(Encoder):
 
         # squeeze because the tokenizer always includes a batch dimension,
         # which we don't want quite yet.
-        data["encoded"] = {k: v.squeeze() for (k, v) in encoded.items()}
+        example["json"]["encoded"] = {k: v.squeeze() for (k, v) in encoded.items()}  # noqa
         return example

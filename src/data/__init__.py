@@ -1,7 +1,9 @@
 from .util import ENCODER_REGISTRY, DATASET_REGISTRY  # noqa
 
 # Populates ENCODER_REGISTRY
-from .encoders import DefaultEncoder  # noqa
+from .encoders import (DefaultEncoder,
+                       DefaultEncoderT5,
+                       DirectionalAttentionEncoder)
 
 # Populates DATASET_REGISTRY
 from .dataset import (ARCStanceDataset,
