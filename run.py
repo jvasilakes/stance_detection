@@ -21,7 +21,7 @@ from src.modeling import MODEL_REGISTRY
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cuda-device", "-D", type=int, default="auto",
+    parser.add_argument("--cuda-device", "-D", type=int, default=0,
                         help="Which GPU to run on, if more than one is available")
 
     subparsers = parser.add_subparsers(dest="command")
