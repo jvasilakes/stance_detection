@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 import pytorch_lightning as pl
 from sklearn.metrics import precision_recall_fscore_support
-from transformers import AutoConfig, AutoModel
+from transformers import AutoConfig, AutoModel, MT5Model
 from transformers import logging as transformers_logging
 from transformers.modeling_outputs import SequenceClassifierOutput
 
@@ -131,7 +131,8 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
         self.llm_config = AutoConfig.from_pretrained(
             self.pretrained_model_name_or_path)
         # Can override LLM config values here, e.g., dropout.
-        self.llm = AutoModel.from_pretrained(
+        #self.llm = AutoModel.from_pretrained(
+        self.llm = MT5Model.from_pretrained(
             self.pretrained_model_name_or_path, config=self.llm_config)
 
         if self.freeze_pretrained is True:
@@ -146,7 +147,8 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
             except AttributeError:
                 continue
         if classifier_insize is None:
-            raise AttributeError("Couldn't find model output dimensionality in config")  # noqa
+            raise AttributeError(
+                "Couldn't find model output dimensionality in config")
         for (task, labeldim) in self.label_spec.items():
             self.classifier_heads[task] = nn.Sequential(
                 nn.Dropout(self.dropout_prob),
@@ -157,8 +159,13 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
     def forward(self, llm_inputs, labels=None):
         llm_outputs = self.llm(**llm_inputs,
                                return_dict=True)
-        # TODO: X{G}LM has no pooler_output
-        pooled_output = llm_outputs.pooler_output
+        try:
+            pooled_output = llm_outputs.pooler_output
+        except AttributeError:
+            # Model has no pooler_output
+            pooled_output = self._get_pooler_output(
+                llm_inputs["input_ids"], llm_outputs.last_hidden_state)
+
         clf_outputs = {}
         for (task, clf_head) in self.classifier_heads.items():
             logits = clf_head(pooled_output)
@@ -170,6 +177,14 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
             clf_outputs[task] = SequenceClassifierOutput(
                 loss=clf_loss, logits=logits)
         return clf_outputs
+
+    def _get_pooler_output(self, input_ids, last_hidden_state):
+        device = last_hidden_state.device
+        eos_mask = input_ids.eq(self.llm_config.eos_token_id).to(device)
+        batch_size, _, hidden_size = last_hidden_state.shape
+        pooled_output = last_hidden_state[eos_mask, :].view(
+            batch_size, -1, hidden_size)[:, -1, :]
+        return pooled_output
 
     def predict_from_logits(self, task, logits):
         labeldim = self.label_spec[task]

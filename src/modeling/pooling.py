@@ -159,8 +159,12 @@ class LLMForMultiTaskSequenceClassificationWithPooling(nn.Module):
 
         # Mask out everything but the body text
         token_mask = torch.zeros_like(llm_outputs.last_hidden_state)
-        # TODO: XGLM does not have token_type_ids
-        token_mask[llm_inputs["token_type_ids"] == 1] = 1
+        if "token_type_ids" in llm_inputs.keys():  # BERT
+            token_mask[llm_inputs["token_type_ids"] == 1] = 1
+        elif "decoder_input_ids" in llm_inputs.keys():  # T5
+            token_mask[llm_inputs["decoder_input_ids"] != 0] = 1
+        else:
+            raise AssertionError("Need token_type_ids or decoder_input_ids to create a token mask!")  # noqa
 
         clf_outputs = {}
         for (task, clf_head) in self.classifier_heads.items():

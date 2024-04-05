@@ -59,9 +59,14 @@ class StancePoolingModelWithAttention(pl.LightningModule):
         mask_coverages = {}
         mask_vals = {}
         # Used for computing mask coverage
-        input_ids = batch["json"]["encoded"]["input_ids"]
-        token_type_ids = batch["json"]["encoded"]["token_type_ids"]
-        body_tokens = input_ids * token_type_ids
+        if "token_type_ids" in batch["json"]["encoded"].keys():
+            # BERT
+            input_ids = batch["json"]["encoded"]["input_ids"]
+            token_type_ids = batch["json"]["encoded"]["token_type_ids"]
+            body_tokens = input_ids * token_type_ids
+        else:
+            # T5
+            body_tokens = batch["json"]["encoded"]["decoder_input_ids"]
         seq_lengths = torch.logical_not(body_tokens == 0).sum(1)
 
         for (task, task_out) in outputs.items():
@@ -192,31 +197,43 @@ class LLMForMultiTaskSequenceClassificationWithAttentionPooling(nn.Module):
         llm_outputs = self.llm(**llm_inputs,
                                return_dict=True)
 
-        if llm_inputs["attention_mask"].dim() == 2:
-            # Attention vector. The target mask is thus where the
-            # token_type_ids are 0 and the attention_mask is 1.
-            target_mask = torch.logical_xor(llm_inputs["token_type_ids"],
-                                            llm_inputs["attention_mask"]).int()  # noqa
+        llm_hidden_dim = llm_outputs.last_hidden_state.size(-1)
+        # target_pooled = self.target_pooler(llm_outputs.last_hidden_state,
+        #                                    target_mask)
+        if "encoder_last_hidden_state" in llm_outputs.keys():
+            # T5
+            target_hidden_state = llm_outputs.encoder_last_hidden_state
+            body_hidden_state = llm_outputs.last_hidden_state
+            target_mask = (llm_inputs["input_ids"] > 0).unsqueeze(-1).repeat(
+                1, 1, llm_hidden_dim).int()
+            body_mask = (llm_inputs["decoder_input_ids"] > 0).unsqueeze(-1).repeat(  # noqa
+                1, 1, llm_hidden_dim).int()
         else:
-            # Attention matrix. Because the target only attends to itself
-            # the target mask is simply the first row of the attention_mask.
-            target_mask = llm_inputs["attention_mask"][:, 0]
+            # BERT
+            target_hidden_state = body_hidden_state = llm_outputs.last_hidden_state  # noqa
+            if llm_inputs["attention_mask"].dim() == 2:
+                # Attention vector. The target mask is thus where the
+                # token_type_ids are 0 and the attention_mask is 1.
+                target_mask = torch.logical_xor(
+                    llm_inputs["token_type_ids"],
+                    llm_inputs["attention_mask"]).int()
+            else:
+                # Attention matrix. Because the target only attends to itself
+                # the target mask is simply the first row of the attention_mask
+                target_mask = llm_inputs["attention_mask"][:, 0]
+            target_mask = target_mask.unsqueeze(-1).repeat(
+                1, 1, llm_hidden_dim)
+            body_mask = torch.zeros_like(llm_outputs.last_hidden_state)
+            body_mask[llm_inputs["token_type_ids"] == 1] = 1
 
-        # TODO: XGLM has no pooler_output
-        llm_hidden_dim = llm_outputs.pooler_output.size(-1)
-        target_mask = target_mask.unsqueeze(-1).repeat(1, 1, llm_hidden_dim)
-
-        body_mask = torch.zeros_like(llm_outputs.last_hidden_state)
-        # TODO: XGLM has no token_type_ids
-        body_mask[llm_inputs["token_type_ids"] == 1] = 1
-
-        target_pooled = self.target_pooler(llm_outputs.last_hidden_state,
-                                           target_mask)
+        target_pooled = self.target_pooler(target_hidden_state, target_mask)
 
         clf_outputs = {}
         for (task, clf_head) in self.classifier_heads.items():
+            # pooled_output, attentions = self.body_poolers[task](
+            #     llm_outputs.last_hidden_state, body_mask, target_pooled)
             pooled_output, attentions = self.body_poolers[task](
-                llm_outputs.last_hidden_state, body_mask, target_pooled)
+                body_hidden_state, body_mask, target_pooled)
             logits = clf_head(pooled_output)
             if labels is not None:
                 clf_loss = self.loss_fn(logits.view(-1, self.label_spec[task]),
