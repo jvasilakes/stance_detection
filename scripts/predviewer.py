@@ -205,21 +205,28 @@ def example2html(example, collapse_wordpiece=False,
 def get_highlighted_tokens(example, collapse_wordpiece=False,
                            rm_special_tokens=False):
     spans = []
-    tokens_with_masks = zip(example["json"]["tokens"],
-                            example["json"]["token_mask"])
+    tokens_with_masks = list(zip(example["json"]["tokens"],
+                                 example["json"]["token_mask"]))
     token_idxs = range(len(example["json"]["tokens"]))
     headline_length = example["json"]["tokens"].index("[SEP]")
+
+    if rm_special_tokens is True:
+        headline_with_masks = tokens_with_masks[:headline_length]
+        headline_with_masks = [(tok, z) for (tok, z) in headline_with_masks
+                               if not is_special_token(tok)]
+        headline_length = len(headline_with_masks)
+        body_with_masks = tokens_with_masks[headline_length:]
+        body_with_masks = [(tok, z) for (tok, z) in body_with_masks
+                           if not is_special_token(tok)]
+        tokens_with_masks = [*headline_with_masks, *body_with_masks]
+
     if collapse_wordpiece is True:
         token_idxs, tokens_with_masks = collapse_wordpiece_tokens(
             tokens_with_masks)
 
     for (i, (tok, z)) in zip(token_idxs, tokens_with_masks):
 
-        if rm_special_tokens is True:
-            if is_special_token(tok):
-                continue
-
-        if i <= headline_length:
+        if i < headline_length:
             style = "color:blue;font-weight:bold"
             title = "headline"
         else:
@@ -235,7 +242,8 @@ def get_highlighted_tokens(example, collapse_wordpiece=False,
 def is_special_token(token):
     specials = [re.escape(r'[CLS]'),
                 re.escape(r'[SEP]'),
-                r'\[\s?unused[0-9]+\s?\]']
+                r'\[\s?unused[0-9]+\s?\]',
+                re.escape(r'</s>')]  # T5
     for special in specials:
         if re.match(special, token) is not None:
             return True
@@ -263,6 +271,9 @@ def collapse_wordpiece_tokens(tokens_with_masks):
         if tok.startswith("##"):
             current_tok += tok.lstrip("##")
             current_zs.append(z)
+        elif not tok.startswith("▁"):
+            current_tok += tok.lstrip()
+            current_zs.append(z)
         else:
             if len(current_zs) > 0:
                 collapsed_idxs.append(current_idx)
@@ -270,7 +281,7 @@ def collapse_wordpiece_tokens(tokens_with_masks):
                 current_idx = i
                 current_tok = ''
                 current_zs = []
-            current_tok = tok
+            current_tok = tok.strip("▁")
             current_zs.append(z)
     collapsed_idxs.append(current_idx)
     output.append((current_tok, sum(current_zs) / len(current_zs)))

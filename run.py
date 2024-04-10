@@ -15,14 +15,13 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 from config import config
 from src.data import StanceDataModule
-from src.data.util import visualize_attention_matrix
 from src.modeling import MODEL_REGISTRY
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cuda-device", "-D", type=int, default=0,
-                        help="Which GPU to run on, if more than one is available")
+                        help="Which GPU to run on, if more than one is available")  # noqa
 
     subparsers = parser.add_subparsers(dest="command")
     train_parser = subparsers.add_parser("train", help="Run model training")
@@ -279,12 +278,26 @@ def decode_and_split_by_task(unbatched, datamodule):
         for task in example["json"]["labels"].keys():
             excp = deepcopy(example)
             encodings = excp["json"].pop("encoded")
+
             input_ids = encodings["input_ids"]
             try:
                 seq_len = input_ids.index(0)
             except ValueError:  # 0 is not in input_ids
                 seq_len = len(input_ids)
-            excp["json"]["tokens"] = datamodule.tokenizer.convert_ids_to_tokens(input_ids[:seq_len])  # noqa
+            tokens = datamodule.tokenizer.convert_ids_to_tokens(input_ids[:seq_len])  # noqa
+
+            # T5
+            if "decoder_input_ids" in encodings.keys():
+                dec_input_ids = encodings["decoder_input_ids"]
+                try:
+                    dec_seq_len = dec_input_ids.index(0)
+                except ValueError:
+                    dec_seq_len = len(dec_input_ids)
+                dec_tokens = datamodule.tokenizer.convert_ids_to_tokens(
+                    dec_input_ids[:dec_seq_len])
+                tokens = [*tokens, "[SEP]", *dec_tokens]
+
+            excp["json"]["tokens"] = tokens
             excp["json"]["task"] = task
             labels = excp["json"].pop("labels")
             excp["json"]["label"] = datamodule.dataset.INVERSE_LABEL_ENCODINGS[task][labels[task]]  # noqa
@@ -292,7 +305,12 @@ def decode_and_split_by_task(unbatched, datamodule):
             excp["json"]["prediction"] = datamodule.dataset.INVERSE_LABEL_ENCODINGS[task][preds[task]]  # noqa
             if "token_masks" in excp["json"].keys():
                 masks = excp["json"].pop("token_masks")
-                excp["json"]["token_mask"] = masks[task][:seq_len]
+                if "decoder_input_ids" in encodings.keys():  # T5
+                    zeros = torch.zeros(seq_len + 1).tolist()  # +1 for [SEP]
+                    token_mask = [*zeros, *masks[task][:dec_seq_len]]
+                else:
+                    token_mask = masks[task][:seq_len]
+                excp["json"]["token_mask"] = token_mask
             yield task, excp
 
 
