@@ -72,16 +72,10 @@ class DefaultEncoderT5(DefaultEncoder):
 
     def run_tokenize(self, example):
         data = example["json"]
-        inputs1_encoded = self.tokenizer(
-            data["target"], max_length=self.max_seq_length // 2,
+        inputs = f"claim: {data['target']} stance: {data['body']}"
+        encoded = self.tokenizer(
+            inputs, max_length=self.max_seq_length // 2,
             padding="max_length", truncation=True, return_tensors="pt")
-        inputs2_encoded = self.tokenizer(
-            data["body"], max_length=self.max_seq_length // 2,
-            padding="max_length", truncation=True, return_tensors="pt")
-        encoded = {"input_ids": inputs1_encoded["input_ids"],
-                   "attention_mask": inputs1_encoded["attention_mask"],
-                   "decoder_input_ids": inputs2_encoded["input_ids"],
-                   "decoder_attention_mask": inputs2_encoded["attention_mask"]}
         return encoded
 
 
