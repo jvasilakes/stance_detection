@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 import pytorch_lightning as pl
 from sklearn.metrics import precision_recall_fscore_support
-from transformers import AutoConfig, AutoModel, T5Model, MT5Model
+from transformers import AutoConfig, AutoModel, T5Model, MT5Model, T5EncoderModel
 from transformers import logging as transformers_logging
 from transformers.modeling_outputs import SequenceClassifierOutput
 
@@ -131,7 +131,8 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
         self.llm_config = AutoConfig.from_pretrained(
             self.pretrained_model_name_or_path)
         # Can override LLM config values here, e.g., dropout.
-        self.llm = AutoModel.from_pretrained(
+        #self.llm = AutoModel.from_pretrained(
+        self.llm = T5EncoderModel.from_pretrained(
             self.pretrained_model_name_or_path, config=self.llm_config)
 
         if self.freeze_pretrained is True:
@@ -156,9 +157,9 @@ class LLMForMultiTaskSequenceClassification(nn.Module):
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, llm_inputs, labels=None):
-        if isinstance(self.llm, (T5Model, MT5Model)):
-            llm_inputs["decoder_input_ids"] = self.llm._shift_right(
-                    llm_inputs["input_ids"])
+        #if isinstance(self.llm, (T5Model, MT5Model)):
+        #    llm_inputs["decoder_input_ids"] = self.llm._shift_right(
+        #            llm_inputs["input_ids"])
         llm_outputs = self.llm(**llm_inputs,
                                return_dict=True)
         try:
