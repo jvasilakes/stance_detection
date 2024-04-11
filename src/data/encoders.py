@@ -74,8 +74,26 @@ class DefaultEncoderT5(DefaultEncoder):
         data = example["json"]
         inputs = f"claim: {data['target']} stance: {data['body']}"
         encoded = self.tokenizer(
-            inputs, max_length=self.max_seq_length // 2,
+            inputs, max_length=self.max_seq_length,
             padding="max_length", truncation=True, return_tensors="pt")
+        return encoded
+
+
+@register_encoder("default-t5-gen")
+class DefaultEncoderT5Generative(DefaultEncoder):
+
+    def run_tokenize(self, example):
+        data = example["json"]
+        inputs = f"claim: {data['target']} stance: {data['body']}"
+        inputs_encoded = self.tokenizer(
+                inputs, max_length=self.max_seq_length,
+                padding="max_length", truncation=True, return_tensors="pt")
+        label_text = data["labels"]["Stance"]  # TODO: don't hard code
+        labels_encoded = self.tokenizer(
+                label_text, max_length=self.max_seq_length,
+                padding="max_length", truncation=True, return_tensors="pt")
+        encoded = {"input_ids": inputs_encoded["input_ids"],
+                   "decoder_input_ids": labels_encoded["input_ids"]}
         return encoded
 
 

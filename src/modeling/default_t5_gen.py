@@ -1,0 +1,139 @@
+import warnings
+from copy import deepcopy
+from collections import defaultdict
+
+import torch
+import torch.nn as nn
+import numpy as np
+import pytorch_lightning as pl
+from sklearn.metrics import precision_recall_fscore_support
+from transformers import AutoConfig, T5ForConditionalGeneration
+from transformers import logging as transformers_logging
+
+from src.modeling.util import register_model
+
+
+# Ignore warning that AutoModel is not using some parameters.
+transformers_logging.set_verbosity_error()
+
+
+@register_model("default-t5")
+class StanceModel(pl.LightningModule):
+
+    def __init__(self, config, label_spec):
+        super().__init__()
+        self.config = config
+        self.model = T5ForSequenceClassification.from_config(
+            config, label_spec)
+        self.validation_step_outputs = []
+
+    def get_model_outputs(self, batch):
+        try:
+            labels = batch["json"]["labels"]
+        except KeyError:
+            labels = None
+        return self(batch["json"]["encoded"], labels=labels)
+
+    def forward(self, inputs, labels=None):
+        return self.model(inputs, labels=labels)
+
+    def training_step(self, batch, batch_idx):
+        outputs = self.get_model_outputs(batch)
+        total_loss = torch.tensor(0.0).to(self.device)
+        for (task, task_out) in outputs.items():
+            loss = task_out.loss
+            total_loss += task_out.loss
+            self.log(f"train_loss_{task}", loss.detach().cpu().item())
+        self.log("train_loss_total", total_loss.detach().cpu().item())
+        return {"__key__": batch["__key__"],
+                "loss": total_loss}
+
+    def validation_step(self, batch, batch_idx):
+        outputs = self.get_model_outputs(batch)
+        total_loss = torch.tensor(0.0).to(self.device)
+        task_losses = {}
+        task_logits = {}
+        for (task, task_out) in outputs.items():
+            loss = task_out.loss
+            total_loss += task_out.loss
+            task_losses[task] = loss.detach().cpu().item()
+            task_logits[task] = task_out.logits.detach().cpu()
+        output = {"__key__": batch["__key__"],
+                  "loss": total_loss.detach().cpu().item(),
+                  "task_losses": task_losses,
+                  "task_logits": task_logits,
+                  "task_labels": batch["json"]["labels"]}
+        self.validation_step_outputs.append(output)
+
+    def on_validation_epoch_end(self):
+        total_losses = []
+        all_task_losses = defaultdict(list)
+        all_preds = defaultdict(list)
+        all_labels = defaultdict(list)
+        for batch in self.validation_step_outputs:
+            total_losses.append(batch["loss"])
+            for (task, task_loss) in batch["task_losses"].items():
+                all_task_losses[task].append(task_loss)
+                logits = batch["task_logits"][task]
+                preds = self.model.predict_from_logits(task, logits)
+                all_preds[task].extend(preds.detach().cpu().numpy())
+                all_labels[task].extend(batch["task_labels"][task].detach().cpu().numpy())  # noqa
+        self.log("avg_val_loss_total", np.mean(total_losses))
+
+        all_f1s = []
+        for (task, losses) in all_task_losses.items():
+            self.log(f"avg_val_loss_{task}", np.mean(losses))
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                _, _, task_f1, _ = precision_recall_fscore_support(
+                    all_labels[task], all_preds[task], average="macro")
+            all_f1s.append(task_f1)
+        self.log("avg_val_f1_total", np.mean(all_f1s))
+        self.validation_step_outputs.clear()
+
+    def predict_step(self, batch, batch_idx):
+        batch_cp = deepcopy(batch)
+        batch_cp["json"]["predictions"] = {}
+        preds = self.llm.generate(batch["input_ids"])
+        batch_cp["json"]["predictions"]["Stance"] = preds
+        return batch_cp
+
+    def configure_optimizers(self):
+        lr = self.config.Training.learn_rate.value
+        weight_decay = self.config.Training.weight_decay.value
+        opt = torch.optim.AdamW(self.parameters(), lr=lr,
+                                weight_decay=weight_decay)
+        return [opt]
+
+
+class T5ForSequenceClassification(nn.Module):
+
+    @classmethod
+    def from_config(cls, config, label_spec):
+        return cls(config.Model.pretrained_model_name_or_path.value,
+                   label_spec,
+                   dropout_prob=config.Model.dropout_prob.value,
+                   freeze_pretrained=config.Model.freeze_pretrained.value)
+
+    def __init__(self, pretrained_model_name_or_path, label_spec,
+                 dropout_prob=0.0, freeze_pretrained=False):
+        super().__init__()
+        self.pretrained_model_name_or_path = pretrained_model_name_or_path
+        self.label_spec = label_spec
+        self.dropout_prob = dropout_prob
+        self.freeze_pretrained = freeze_pretrained
+
+        self.llm_config = AutoConfig.from_pretrained(
+            self.pretrained_model_name_or_path)
+        # Can override LLM config values here, e.g., dropout.
+        self.llm = T5ForConditionalGeneration.from_pretrained(
+            self.pretrained_model_name_or_path, config=self.llm_config)
+
+        if self.freeze_pretrained is True:
+            for param in self.llm.parameters():
+                param.requires_grad = False
+
+    def forward(self, llm_inputs, labels=None):
+        llm_outputs = self.llm(**llm_inputs, labels=labels, return_dict=True)
+        return llm_outputs
