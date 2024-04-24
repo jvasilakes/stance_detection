@@ -87,8 +87,8 @@ def model_name(val):
     assert val in MODEL_REGISTRY.keys()
 
 
-@config.parameter(group="Model", default="bert-base-uncased", types=str)  # noqa
-def pretrained_model_name_or_path(val):
+@config.parameter(group="Model", default="bert-base-uncased", types=str)
+def pretrained_model_name_or_path(val):  # noqa
     pass
 
 
