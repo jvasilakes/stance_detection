@@ -82,6 +82,14 @@ def max_seq_length(val):
     assert val > 0
 
 
+@config.parameter(group="Data.Encoder", default=True, types=bool)
+def encode_labels(val):
+    """
+    Encode labels as integers. Set to false for T5 models.
+    """
+    pass
+
+
 @config.parameter(group="Model", default="default", types=str)
 def model_name(val):
     assert val in MODEL_REGISTRY.keys()

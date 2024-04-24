@@ -10,6 +10,7 @@ from .dataset import (ARCStanceDataset,
                       RumourEvalTaskADataset,
                       DanishRumourDataset,
                       RussianStanceDataset,
-                      AraStanceDataset)
+                      AraStanceDataset,
+                      IMDBDataset)
 
 from .datamodule import StanceDataModule  # noqa

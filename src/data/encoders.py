@@ -88,12 +88,16 @@ class DefaultEncoderT5Generative(DefaultEncoder):
         inputs_encoded = self.tokenizer(
                 inputs, max_length=self.max_seq_length,
                 padding="max_length", truncation=True, return_tensors="pt")
-        label_text = data["labels"]["Stance"]  # TODO: don't hard code
-        labels_encoded = self.tokenizer(
-                label_text, max_length=self.max_seq_length,
-                padding="max_length", truncation=True, return_tensors="pt")
-        encoded = {"input_ids": inputs_encoded["input_ids"],
-                   "decoder_input_ids": labels_encoded["input_ids"]}
+        encoded = {"input_ids": inputs_encoded["input_ids"]}
+
+        if "labels" in data.keys():
+            label_text = data["labels"]["Stance"]  # TODO: don't hard code
+            if label_text ==  "deny":
+                label_text == "reject"
+            labels_encoded = self.tokenizer(
+                    label_text, max_length=3,
+                    padding="max_length", truncation=True, return_tensors="pt")
+            encoded["labels"] = labels_encoded["input_ids"]
         return encoded
 
 

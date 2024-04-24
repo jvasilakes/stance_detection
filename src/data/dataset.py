@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import warnings
 from glob import glob
@@ -36,6 +37,7 @@ class AbstractStanceDataset(object):
             encoder = ENCODER_REGISTRY[encoder_type].from_config(config)
         return cls(datadir=config.Data.datadir.value,
                    encoder=encoder,
+                   encode_labels=config.Data.Encoder.encode_labels,
                    tasks_to_load=config.Data.tasks_to_load.value,
                    num_examples=config.Data.num_examples.value,
                    random_seed=config.Experiment.random_seed.value)
@@ -43,12 +45,14 @@ class AbstractStanceDataset(object):
     def __init__(self,
                  datadir,
                  encoder=None,
+                 encode_labels=True,
                  tasks_to_load="all",
                  num_examples=-1,
                  random_seed=0):
         assert os.path.isdir(datadir), f"{datadir} is not a directory."
         self.datadir = datadir
         self.encoder = encoder
+        self.encode_labels = encode_labels
         self.num_examples = num_examples
 
         if isinstance(tasks_to_load, str):
@@ -90,8 +94,10 @@ class AbstractStanceDataset(object):
                     break
                 example = json.loads(line.strip())
                 example = self.tasks_filter(example)
+                if self.encode_labels is True:
+                    example = self.transform_labels(example)
                 if self.encoder is not None:
-                    example = self.encoder(self.transform_labels(example))
+                    example = self.encoder(example)
                 examples.append(example)
             splits.append(examples)
         return splits  # (train, val, test)
@@ -267,6 +273,7 @@ class RumourEvalTaskADataset(AbstractStanceDataset):
             encoder = ENCODER_REGISTRY[encoder_type].from_config(config)
         return cls(datadir=config.Data.datadir.value,
                    encoder=encoder,
+                   encode_labels=config.Data.Encoder.encode_labels,
                    tasks_to_load=config.Data.tasks_to_load.value,
                    num_examples=config.Data.num_examples.value,
                    random_seed=config.Experiment.random_seed.value,
@@ -275,6 +282,7 @@ class RumourEvalTaskADataset(AbstractStanceDataset):
     def __init__(self,
                  datadir,
                  encoder=None,
+                 encode_labels=True,
                  tasks_to_load="all",
                  num_examples=-1,
                  random_seed=0,
@@ -288,8 +296,9 @@ class RumourEvalTaskADataset(AbstractStanceDataset):
         self.load_reddit = load_reddit
         assert example_format in ["stances_only", "pairs", "conversations"]
         self.example_format = example_format
-        super().__init__(datadir, encoder=encoder, tasks_to_load=tasks_to_load,
-                         num_examples=num_examples, random_seed=random_seed)
+        super().__init__(datadir, encoder=encoder, encode_labels=encode_labels,
+                         tasks_to_load=tasks_to_load, num_examples=num_examples,
+                         random_seed=random_seed)
 
     def load_raw(self):
         warnings.warn("Data is not encoded! You should save this data split with dm.save(outdir) and then load it again to use it as input to a model.")  # noqa
@@ -426,7 +435,8 @@ class RumourEvalTaskADataset(AbstractStanceDataset):
             for task in self.tasks_to_load:
                 subtask = task_2_subtask[task]
                 try:
-                    example_labels[task] = labels[subtask][key]
+                    lab = labels[subtask][key]
+                    example_labels[task] = lab
                 except KeyError:
                     # Keep whatever labels we find.
                     pass
@@ -571,6 +581,7 @@ class DanishRumourDataset(AbstractStanceDataset):
             encoder = ENCODER_REGISTRY[encoder_type].from_config(config)
         return cls(datadir=config.Data.datadir.value,
                    encoder=encoder,
+                   encode_labels=config.Data.Encoder.encode_labels,
                    tasks_to_load=config.Data.tasks_to_load.value,
                    num_examples=config.Data.num_examples.value,
                    random_seed=config.Experiment.random_seed.value,
@@ -579,13 +590,15 @@ class DanishRumourDataset(AbstractStanceDataset):
     def __init__(self,
                  datadir,
                  encoder=None,
+                 encode_labels=True,
                  tasks_to_load="all",
                  num_examples=-1,
                  random_seed=0,
                  example_format="pairs"):
         self.example_format = example_format
-        super().__init__(datadir, encoder=encoder, tasks_to_load=tasks_to_load,
-                         num_examples=num_examples, random_seed=random_seed)
+        super().__init__(datadir, encoder=encoder, encode_labels=encode_labels,
+                         tasks_to_load=tasks_to_load, num_examples=num_examples,
+                         random_seed=random_seed)
 
     def load_raw(self):
         """
@@ -750,3 +763,58 @@ class AraStanceDataset(AbstractStanceDataset):
                            }
                 examples.append(example)
         return examples
+
+
+@register_dataset("imdb")
+class IMDBDataset(AbstractStanceDataset):
+
+    LABEL_ENCODINGS = {
+                "Stance": {"negative": 0,
+                           "positive": 1}
+    }
+
+    def load_raw(self):
+        splits = []
+        for split in ["train", "test"]:
+            examples = self.load_split(os.path.join(self.datadir, split))
+            if split == "train":
+                labels = [ex["json"]["labels"]["Stance"] for ex in examples]
+                train, val = train_test_split(examples, test_size=2000, stratify=labels)
+                splits.append(train)
+                splits.append(val)
+            else:
+                splits.append(examples)
+        return splits
+
+    def load_split(self, splitdir):
+        examples = []
+
+        posdir = os.path.join(splitdir, "pos")
+        posfiles = glob(os.path.join(posdir, "*.txt"))
+        examples.extend(self._get_examples(posfiles, "positive"))
+
+        negdir = os.path.join(splitdir, "neg")
+        negfiles = glob(os.path.join(negdir, "*.txt"))
+        examples.extend(self._get_examples(negfiles, "negative"))
+
+        return examples
+
+    def _get_examples(self, files, label):
+        REPLACE_NO_SPACE = re.compile("[.;:!\'?,\"()\[\]]")
+        REPLACE_WITH_SPACE = re.compile("(<br\s*/><br\s*/>)|(\-)|(\/)")
+        for f in files:
+            with open(f, 'r') as inF:
+                text = inF.read()
+
+            text = text.strip()
+            text = REPLACE_NO_SPACE.sub("", text)
+            text = REPLACE_WITH_SPACE.sub("", text)
+            
+            example = {"__key__": os.path.basename(os.path.splitext(f)[0]),
+                       "__url__": f,
+                       "json": {"target": '',
+                                "body": text,
+                                "labels": {"Stance": label}}
+                       }
+            yield example
+

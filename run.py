@@ -18,6 +18,9 @@ from src.data import StanceDataModule
 from src.modeling import MODEL_REGISTRY
 
 
+torch.set_float32_matmul_precision('high')
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cuda-device", "-D", type=int, default=0,
@@ -205,7 +208,7 @@ def run_predict(config, datasplit, quiet=False, cuda_device="auto"):
     ignore_keys = ["token_type_ids", "attention_mask",
                    "position_ids", "levitated_idxs"]
     preds = unbatch(preds, ignore_keys=ignore_keys)
-    preds_by_task = decode_and_split_by_task(preds, datamodule)
+    preds_by_task = decode_and_split_by_task(preds, datamodule, config)
     created_outfile = []
     print("Saving...")
     if quiet is False:
@@ -273,7 +276,7 @@ def maybe_convert(value):
     return value
 
 
-def decode_and_split_by_task(unbatched, datamodule):
+def decode_and_split_by_task(unbatched, datamodule, config):
     for example in unbatched:
         for task in example["json"]["labels"].keys():
             excp = deepcopy(example)
@@ -300,9 +303,14 @@ def decode_and_split_by_task(unbatched, datamodule):
             excp["json"]["tokens"] = tokens
             excp["json"]["task"] = task
             labels = excp["json"].pop("labels")
-            excp["json"]["label"] = datamodule.dataset.INVERSE_LABEL_ENCODINGS[task][labels[task]]  # noqa
+            label = labels[task]
             preds = excp["json"].pop("predictions")
-            excp["json"]["prediction"] = datamodule.dataset.INVERSE_LABEL_ENCODINGS[task][preds[task]]  # noqa
+            pred = preds[task]
+            if config.Data.Encoder.encode_labels.value is True:
+                label = datamodule.dataset.INVERSE_LABEL_ENCODINGS[task][labels[task]]  # noqa
+                pred = datamodule.dataset.INVERSE_LABEL_ENCODINGS[task][preds[task]]  # noqa
+            excp["json"]["label"] = label
+            excp["json"]["prediction"] = pred
             if "token_masks" in excp["json"].keys():
                 masks = excp["json"].pop("token_masks")
                 if "decoder_input_ids" in encodings.keys():  # T5
