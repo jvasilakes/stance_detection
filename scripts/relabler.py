@@ -43,7 +43,7 @@ def map_labels(example, labelmap):
     excp = deepcopy(example)
     for (task, val) in excp["json"]["labels"].items():
         try:
-            excp["json"]["labels"][task] = labelmap[val]
+            excp["json"]["labels"][task] = labelmap[task][val]
             return (excp, 1)
         except KeyError:
             return (example, 0)

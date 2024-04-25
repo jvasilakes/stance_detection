@@ -23,11 +23,11 @@ class StanceModelT5Gen(pl.LightningModule):
     def __init__(self, config, label_spec):
         super().__init__()
         self.config = config
-        self.model = T5ForSequenceClassification.from_config(
-            config, label_spec)
-        self.validation_step_outputs = []
         self.tokenizer = AutoTokenizer.from_pretrained(
                 config.Data.Encoder.pretrained_model_name_or_path.value)
+        self.model = T5ForSequenceClassification.from_config(
+            config, label_spec, self.tokenizer)
+        self.validation_step_outputs = []
 
     def get_model_outputs(self, batch):
         return self(batch["json"]["encoded"])
@@ -106,13 +106,13 @@ class StanceModelT5Gen(pl.LightningModule):
 class T5ForSequenceClassification(nn.Module):
 
     @classmethod
-    def from_config(cls, config, label_spec):
+    def from_config(cls, config, label_spec, tokenizer):
         return cls(config.Model.pretrained_model_name_or_path.value,
-                   label_spec,
+                   label_spec, tokenizer,
                    dropout_prob=config.Model.dropout_prob.value,
                    freeze_pretrained=config.Model.freeze_pretrained.value)
 
-    def __init__(self, pretrained_model_name_or_path, label_spec,
+    def __init__(self, pretrained_model_name_or_path, label_spec, tokenizer,
                  dropout_prob=0.0, freeze_pretrained=False):
         super().__init__()
         self.pretrained_model_name_or_path = pretrained_model_name_or_path
@@ -121,6 +121,7 @@ class T5ForSequenceClassification(nn.Module):
         # Because this is T5, encode_labels=False and so label_spec is
         # a dictionary of {task: {label: int}}
         self.label_spec = label_spec
+        self.tokenizer = tokenizer
         self.dropout_prob = dropout_prob
         self.freeze_pretrained = freeze_pretrained
 
@@ -140,14 +141,15 @@ class T5ForSequenceClassification(nn.Module):
                        for label in labels.keys()]
         self.label_tok_ids = tokenizer(label_texts, is_split_into_words=True)["input_ids"]  # noqa
         print(label_texts)
-        print(self.label_tok_ids)
-        input()
+        print(self.label_tok_ids); input()
+        self.label_tok_ids = torch.as_tensor(self.label_tok_ids)
         self.label_fn = lambda *args: self.label_tok_ids
-        # label_weights = torch.zeros(self.llm.config.vocab_size, dtype=self.llm.dtype)
-        # label_weights[self.label_tok_ids] = torch.tensor([1/18, 1/7, 1/7, 1/8, 1/67, 1.],
-        #                                                  dtype=self.llm.dtype)
-        # self.loss_fn = nn.CrossEntropyLoss(weight=label_weights, ignore_index=-100)
-        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+        label_weights = torch.zeros(self.llm.config.vocab_size, dtype=self.llm.dtype)
+        #['disagree', 'agree', 'query', 'comment']
+        label_weights[self.label_tok_ids] = torch.tensor([1/7, 1/18, 1/8, 1/67, 1.],
+                                                         dtype=self.llm.dtype)
+        self.loss_fn = nn.CrossEntropyLoss(weight=label_weights, ignore_index=-100)
+        #self.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
         if self.freeze_pretrained is True:
             for param in self.llm.parameters():

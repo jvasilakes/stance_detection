@@ -8,6 +8,7 @@ from .encoders import (DefaultEncoder,
 # Populates DATASET_REGISTRY
 from .dataset import (ARCStanceDataset,
                       RumourEvalTaskADataset,
+                      RumourEvalTaskADatasetRelabeled,
                       DanishRumourDataset,
                       RussianStanceDataset,
                       AraStanceDataset,

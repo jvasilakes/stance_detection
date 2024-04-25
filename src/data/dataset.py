@@ -37,7 +37,7 @@ class AbstractStanceDataset(object):
             encoder = ENCODER_REGISTRY[encoder_type].from_config(config)
         return cls(datadir=config.Data.datadir.value,
                    encoder=encoder,
-                   encode_labels=config.Data.Encoder.encode_labels,
+                   encode_labels=config.Data.Encoder.encode_labels.value,
                    tasks_to_load=config.Data.tasks_to_load.value,
                    num_examples=config.Data.num_examples.value,
                    random_seed=config.Experiment.random_seed.value)
@@ -72,7 +72,9 @@ class AbstractStanceDataset(object):
     @property
     def label_spec(self):
         if self.encode_labels is False:
-            return self.LABEL_ENCODINGS
+            return {task: labs for (task, labs)
+                    in self.LABEL_ENCODINGS.items()
+                    if task in self.tasks_to_load}
         else:
             return {task: len(labs) for (task, labs)
                     in self.LABEL_ENCODINGS.items()
@@ -81,7 +83,7 @@ class AbstractStanceDataset(object):
     def load(self):
         datafiles = set(os.listdir(self.datadir))
         preprocessed_files = {"train.jsonl", "val.jsonl", "test.jsonl"}
-        if datafiles == preprocessed_files:
+        if len(datafiles.intersection(preprocessed_files)) == len(preprocessed_files):
             train, val, test = self.load_preprocessed()
         else:
             train, val, test = self.load_raw()
@@ -276,7 +278,7 @@ class RumourEvalTaskADataset(AbstractStanceDataset):
             encoder = ENCODER_REGISTRY[encoder_type].from_config(config)
         return cls(datadir=config.Data.datadir.value,
                    encoder=encoder,
-                   encode_labels=config.Data.Encoder.encode_labels,
+                   encode_labels=config.Data.Encoder.encode_labels.value,
                    tasks_to_load=config.Data.tasks_to_load.value,
                    num_examples=config.Data.num_examples.value,
                    random_seed=config.Experiment.random_seed.value,
@@ -584,7 +586,7 @@ class DanishRumourDataset(AbstractStanceDataset):
             encoder = ENCODER_REGISTRY[encoder_type].from_config(config)
         return cls(datadir=config.Data.datadir.value,
                    encoder=encoder,
-                   encode_labels=config.Data.Encoder.encode_labels,
+                   encode_labels=config.Data.Encoder.encode_labels.value,
                    tasks_to_load=config.Data.tasks_to_load.value,
                    num_examples=config.Data.num_examples.value,
                    random_seed=config.Experiment.random_seed.value,
@@ -820,4 +822,18 @@ class IMDBDataset(AbstractStanceDataset):
                                 "labels": {"Stance": label}}
                        }
             yield example
+
+
+@register_dataset("rumoureval-relabeled")
+class RumourEvalTaskADatasetRelabeled(RumourEvalTaskADataset):
+
+    LABEL_ENCODINGS = {
+        "Stance": {"disagree": 0,
+                   "agree": 1,
+                   "query": 2,
+                   "comment": 3},
+        "Veracity": {"false": 0,
+                     "true": 1,
+                     "unverified": 2}
+    }
 
