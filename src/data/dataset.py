@@ -71,9 +71,12 @@ class AbstractStanceDataset(object):
 
     @property
     def label_spec(self):
-        return {task: len(labs) for (task, labs)
-                in self.LABEL_ENCODINGS.items()
-                if task in self.tasks_to_load}
+        if self.encode_labels is False:
+            return self.LABEL_ENCODINGS
+        else:
+            return {task: len(labs) for (task, labs)
+                    in self.LABEL_ENCODINGS.items()
+                    if task in self.tasks_to_load}
 
     def load(self):
         datafiles = set(os.listdir(self.datadir))

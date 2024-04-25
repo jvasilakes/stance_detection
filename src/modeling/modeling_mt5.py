@@ -1898,6 +1898,7 @@ class MT5ForExplainableSequenceClassification(MT5ForConditionalGeneration):
         self.decoder.block[-1].layer[1] = MyMT5LayerCrossAttention(
             cross_attn_config, projection_fn="sparsegen-lin",
             projection_fn_kwargs={"lam": 0.1})
+        # Mask out all but one head in the final cross attention layer.
         self.cross_attn_head_mask = torch.ones((config.num_layers, config.num_heads))
         self.cross_attn_head_mask[-1, :-1] = 0
 
