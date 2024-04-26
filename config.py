@@ -96,7 +96,7 @@ def model_name(val):
 
 
 @config.parameter(group="Model", default="bert-base-uncased", types=str)  # noqa
-def pretrained_model_name_or_path(val):
+def pretrained_model_name_or_path(val):  # noqa
     pass
 
 
@@ -159,6 +159,19 @@ def weight_decay(val):
 @config.parameter(group="Training", default=1, types=int)
 def accumulate_grad_batches(val):
     assert val > 0
+
+
+@config.parameter(group="Training", default={}, types=dict)
+def label_weights(val):
+    """
+    Dictionary of {task: {label: weight}}
+    """
+    for (task, lw) in val.items():
+        assert isinstance(task, str)
+        assert isinstance(lw, dict)
+        for (l, w) in lw.items():
+            assert isinstance(l, str)
+            assert isinstance(w, float)
 
 
 @config.on_load
