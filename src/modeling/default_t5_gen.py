@@ -11,6 +11,7 @@ from transformers import AutoConfig, T5ForConditionalGeneration, AutoTokenizer
 from transformers import logging as transformers_logging
 
 from src.modeling.util import register_model
+from src.modeling.modeling_mt5 import MT5ForExplainableConditionalGeneration
 
 
 # Ignore warning that AutoModel is not using some parameters.
@@ -93,6 +94,8 @@ class StanceModelT5Gen(pl.LightningModule):
         preds = self.model.predict_from_logits(outputs.logits)
         preds = self.tokenizer.batch_decode(preds, skip_special_tokens=True)
         batch_cp["json"]["predictions"]["Stance"] = preds
+        cross_attns = outputs.cross_attentions[-1][:, -1, :, :].detach().cpu().tolist()
+        batch_cp["json"]["cross_attns"] = cross_attns
         return batch_cp
 
     def configure_optimizers(self):
@@ -128,7 +131,8 @@ class T5ForSequenceClassification(nn.Module):
         self.llm_config = AutoConfig.from_pretrained(
             self.pretrained_model_name_or_path)
         # Can override LLM config values here, e.g., dropout.
-        self.llm = T5ForConditionalGeneration.from_pretrained(
+        #self.llm = T5ForConditionalGeneration.from_pretrained(
+        self.llm = MT5ForExplainableConditionalGeneration.from_pretrained(
             self.pretrained_model_name_or_path, config=self.llm_config,
             torch_dtype=torch.bfloat16)
 
@@ -137,39 +141,46 @@ class T5ForSequenceClassification(nn.Module):
         # a dictionary of {task: {label: int}}
         label_texts = [label for (task, labels) in self.label_spec.items()
                        for label in labels.keys()]
+        label_texts.append("</s>")
         label_tok_ids = tokenizer(
             label_texts, add_special_tokens=False)["input_ids"]
         # {label: [token_ids]}
         labels2tokids = dict(zip(label_texts, label_tok_ids))
-        label_weights = self._get_label_weights(self.label_weights_dict,
-                                                labels2tokids)
+        task = list(self.label_spec.keys())[0]
+        self.label_weights_dict[task]["</s>"] = 1.
+        label_weights = self._get_label_weights(
+                task, self.label_weights_dict, labels2tokids)
         self.loss_fn = nn.CrossEntropyLoss(
             weight=label_weights, ignore_index=-100)
 
         # Flatten and convert to tensor so it can be used to index logits.
+        # Used by generate() in predict_from_input_ids()
         self.label_tok_ids = torch.as_tensor(
             [tok_id for lab_ids in label_tok_ids for tok_id in lab_ids])
-        # Used by generate() in predict_from_input_ids()
         self.label_fn = lambda *args: self.label_tok_ids
 
         if self.freeze_pretrained is True:
             for param in self.llm.parameters():
                 param.requires_grad = False
 
-    def _get_label_weights(self, label_weights_dict, labels2tokids):
+    def _get_label_weights(self, task, label_weights_dict, labels2tokids):
         # We need to create a list of label weights that is
         # aligned with the label tokens, since tokenization can split
         # labels into multiple tokens.
         label_weights = torch.zeros(self.llm.config.vocab_size,
                                     dtype=self.llm.dtype)
+        try:
+            task_weights = label_weights_dict[task]
+        except KeyError:
+            task_weights = {lab: 1. for lab in labels2tokids.keys()}
         for (lab, tok_ids) in labels2tokids.items():
-            weight = label_weights_dict[lab]
+            weight = task_weights[lab]
             for tok_id in tok_ids:
                 label_weights[tok_id] = weight
         return label_weights
 
     def forward(self, llm_inputs):
-        llm_outputs = self.llm(**llm_inputs, return_dict=True)
+        llm_outputs = self.llm(**llm_inputs, return_dict=True, output_attentions=True)
         if "labels" in llm_inputs.keys():
             weighted_loss = self.compute_loss_from_logits(
                     llm_outputs.logits, llm_inputs["labels"])

@@ -1876,7 +1876,7 @@ class MT5ForConditionalGeneration(MT5PreTrainedModel):
         return reordered_decoder_past
 
 
-class MT5ForExplainableSequenceClassification(MT5ForConditionalGeneration):
+class MT5ForExplainableConditionalGeneration(MT5ForConditionalGeneration):
 
     def __init__(self, config: MT5Config):
         super().__init__(config)
@@ -1899,8 +1899,9 @@ class MT5ForExplainableSequenceClassification(MT5ForConditionalGeneration):
             cross_attn_config, projection_fn="sparsegen-lin",
             projection_fn_kwargs={"lam": 0.1})
         # Mask out all but one head in the final cross attention layer.
-        self.cross_attn_head_mask = torch.ones((config.num_layers, config.num_heads))
-        self.cross_attn_head_mask[-1, :-1] = 0
+        cross_attn_head_mask = torch.ones((config.num_layers, config.num_heads))
+        cross_attn_head_mask[-1, :-1] = 0
+        self.register_buffer("cross_attn_head_mask", cross_attn_head_mask)
 
         # Initialize weights and apply final processing
         self.post_init()
