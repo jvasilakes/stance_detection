@@ -83,7 +83,7 @@ class AbstractStanceDataset(object):
     def load(self):
         datafiles = set(os.listdir(self.datadir))
         preprocessed_files = {"train.jsonl", "val.jsonl", "test.jsonl"}
-        if len(datafiles.intersection(preprocessed_files)) == len(preprocessed_files):
+        if len(datafiles.intersection(preprocessed_files)) == len(preprocessed_files):  # noqa
             train, val, test = self.load_preprocessed()
         else:
             train, val, test = self.load_raw()
@@ -302,7 +302,7 @@ class RumourEvalTaskADataset(AbstractStanceDataset):
         assert example_format in ["stances_only", "pairs", "conversations"]
         self.example_format = example_format
         super().__init__(datadir, encoder=encoder, encode_labels=encode_labels,
-                         tasks_to_load=tasks_to_load, num_examples=num_examples,
+                         tasks_to_load=tasks_to_load, num_examples=num_examples,  # noqa
                          random_seed=random_seed)
 
     def load_raw(self):
@@ -602,7 +602,7 @@ class DanishRumourDataset(AbstractStanceDataset):
                  example_format="pairs"):
         self.example_format = example_format
         super().__init__(datadir, encoder=encoder, encode_labels=encode_labels,
-                         tasks_to_load=tasks_to_load, num_examples=num_examples,
+                         tasks_to_load=tasks_to_load, num_examples=num_examples,  # noqa
                          random_seed=random_seed)
 
     def load_raw(self):
@@ -784,7 +784,8 @@ class IMDBDataset(AbstractStanceDataset):
             examples = self.load_split(os.path.join(self.datadir, split))
             if split == "train":
                 labels = [ex["json"]["labels"]["Stance"] for ex in examples]
-                train, val = train_test_split(examples, test_size=2000, stratify=labels)
+                train, val = train_test_split(
+                    examples, test_size=2000, stratify=labels)
                 splits.append(train)
                 splits.append(val)
             else:
@@ -805,8 +806,8 @@ class IMDBDataset(AbstractStanceDataset):
         return examples
 
     def _get_examples(self, files, label):
-        REPLACE_NO_SPACE = re.compile("[.;:!\'?,\"()\[\]]")
-        REPLACE_WITH_SPACE = re.compile("(<br\s*/><br\s*/>)|(\-)|(\/)")
+        REPLACE_NO_SPACE = re.compile(r"[.;:!\'?,\"()\[\]]")
+        REPLACE_WITH_SPACE = re.compile(r"(<br\s*/><br\s*/>)|(\-)|(\/)")
         for f in files:
             with open(f, 'r') as inF:
                 text = inF.read()
@@ -814,7 +815,7 @@ class IMDBDataset(AbstractStanceDataset):
             text = text.strip()
             text = REPLACE_NO_SPACE.sub("", text)
             text = REPLACE_WITH_SPACE.sub("", text)
-            
+
             example = {"__key__": os.path.basename(os.path.splitext(f)[0]),
                        "__url__": f,
                        "json": {"target": '',
@@ -837,3 +838,42 @@ class RumourEvalTaskADatasetRelabeled(RumourEvalTaskADataset):
                      "unverified": 2}
     }
 
+
+@register_dataset("semeval2016")
+class SemEval2016Dataset(AbstractStanceDataset):
+
+    LABEL_ENCODINGS = {"Stance": {"AGAINST": 0,
+                                  "FAVOR": 1,
+                                  "NONE": 2}
+                       }
+
+    def load_raw(self):
+        splits = []
+        for split in ["train", "test"]:
+            if split == "train":
+                filename = "semeval2016-task6-trainingdata.txt"
+            else:
+                filename = "SemEval2016-Task6-subtaskA-testdata-gold.txt"
+            examples = self.load_file(os.path.join(self.datadir, filename))
+            if split == "train":
+                labels = [ex["json"]["labels"]["Stance"] for ex in examples]
+                train, val = train_test_split(
+                    examples, test_size=0.2, stratify=labels)
+                splits.append(train)
+                splits.append(val)
+            else:
+                splits.append(examples)
+        return splits
+
+    def load_file(self, filepath):
+
+        def to_example(df_row):
+            return {"__key__": df_row.ID,
+                    "__url__": filepath,
+                    "json": {"target": df_row.Target,
+                             "body": df_row.Tweet,
+                             "labels": {"Stance": df_row.Stance}}
+                    }
+
+        data = pd.read_csv(filepath, delimiter='\t')
+        return list(data.apply(to_example, axis=1))

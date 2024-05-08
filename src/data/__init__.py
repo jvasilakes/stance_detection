@@ -12,6 +12,7 @@ from .dataset import (ARCStanceDataset,
                       DanishRumourDataset,
                       RussianStanceDataset,
                       AraStanceDataset,
-                      IMDBDataset)
+                      IMDBDataset,
+                      SemEval2016Dataset)
 
 from .datamodule import StanceDataModule  # noqa

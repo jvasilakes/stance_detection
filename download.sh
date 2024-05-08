@@ -46,3 +46,10 @@ git clone https://github.com/lozhn/rustance.git
 mv rustance $DATA_DIR/
 python scripts/preprocess_dataset.py rustance $DATA_DIR/rustance/Dataset $DATA_DIR/rustance/preprocessed > tmp.txt
 mv tmp.txt $DATA_DIR/rustance/preprocessed_stats.txt
+
+# SemEval 2016
+mkdir $DATA_DIR/semeval2016
+wget -O $DATA_DIR/semeval2016/ https://www.dropbox.com/sh/o8789zsmpvy7bu3/AADz9yPn3P1WJmV_m194OlkCa/semeval2016-task6-trainingdata.txt
+wget -O $DATA_DIR/semeval2016/ https://www.dropbox.com/sh/o8789zsmpvy7bu3/AACL3ZZrMCCqQCCaWGEGQgYua/SemEval2016-Task6-subtaskA-testdata-gold.txt
+# There are some invalid unicode characters in the training data.
+sed 's/\xcd\xa2\x91\x84\x91\xee//g' $DATA_DIR/semeval2016-task6-trainingdata.txt > $DATA_DIR/tmp.txt; mv $DATA_DIR/tmp.txt $DATA_DIR/semeval2016-task6-trainingdata.txt
