@@ -843,7 +843,7 @@ class RumourEvalTaskADatasetRelabeled(RumourEvalTaskADataset):
 class SemEval2016Dataset(AbstractStanceDataset):
 
     LABEL_ENCODINGS = {"Stance": {"AGAINST": 0,
-                                  "FAVOR": 1,
+                                  "SUPPORT": 1,
                                   "NONE": 2}
                        }
 
@@ -868,11 +868,15 @@ class SemEval2016Dataset(AbstractStanceDataset):
     def load_file(self, filepath):
 
         def to_example(df_row):
+            label = df_row.Stance
+            # Relabel FAVOR -> SUPPORT to accomodate tokenization in LLMs
+            if label == "FAVOR":
+                label = "SUPPORT"
             return {"__key__": df_row.ID,
                     "__url__": filepath,
                     "json": {"target": df_row.Target,
                              "body": df_row.Tweet,
-                             "labels": {"Stance": df_row.Stance}}
+                             "labels": {"Stance": label}}
                     }
 
         data = pd.read_csv(filepath, delimiter='\t')
