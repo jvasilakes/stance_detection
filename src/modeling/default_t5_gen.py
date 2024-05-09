@@ -63,7 +63,8 @@ class StanceModelT5Gen(pl.LightningModule):
             for (task, task_loss) in batch["task_losses"].items():
                 all_task_losses[task].append(task_loss)
                 logits = batch["task_logits"][task]
-                preds = self.model.predict_from_logits(logits)
+                #preds = self.model.predict_from_logits(logits)
+                preds = self.model.predict_from_input_ids(batch["input_ids"])
                 preds_text = self.tokenizer.batch_decode(
                         preds, skip_special_tokens=True)
                 all_preds[task].extend(preds_text)
@@ -91,7 +92,8 @@ class StanceModelT5Gen(pl.LightningModule):
         batch_cp = deepcopy(batch)
         batch_cp["json"]["predictions"] = {}
         outputs = self.get_model_outputs(batch)
-        preds = self.model.predict_from_logits(outputs.logits)
+        preds = self.model.predict_from_input_ids(batch_cp["json"]["encoded"]["input_ids"])
+        #preds = self.model.predict_from_logits(outputs.logits)
         preds = self.tokenizer.batch_decode(preds, skip_special_tokens=True)
         batch_cp["json"]["predictions"]["Stance"] = preds
         cross_attns = outputs.cross_attentions[-1][:, -1, :, :].detach().cpu().tolist()
@@ -131,8 +133,8 @@ class T5ForSequenceClassification(nn.Module):
         self.llm_config = AutoConfig.from_pretrained(
             self.pretrained_model_name_or_path)
         # Can override LLM config values here, e.g., dropout.
-        #self.llm = T5ForConditionalGeneration.from_pretrained(
-        self.llm = MT5ForExplainableConditionalGeneration.from_pretrained(
+        #self.llm = MT5ForExplainableConditionalGeneration.from_pretrained(
+        self.llm = T5ForConditionalGeneration.from_pretrained(
             self.pretrained_model_name_or_path, config=self.llm_config,
             torch_dtype=torch.bfloat16)
 
