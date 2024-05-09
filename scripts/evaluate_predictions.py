@@ -44,6 +44,9 @@ def main(args):
 
     sorted_labels = sorted(set(labels))
     cm = confusion_matrix(labels, preds, labels=sorted_labels)
+    num_predicted = cm.sum()
+    num_examples = len(labels)
+    print(f"Predicted {num_predicted} / {num_examples}")
     print_confusion_matrix(cm)
     p, r, f, _ = precision_recall_fscore_support(labels, preds, average=None,
                                                  labels=sorted_labels)
